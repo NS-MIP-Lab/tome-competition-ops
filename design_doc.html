@@ -161,6 +161,15 @@
   }
   .hint-flash-inner span{display:block;margin-top:10px;font-size:18px;font-weight:600;opacity:.9;}
 
+  /* ===== 前回データの警告（被験者の取り違え防止） ===== */
+  .warn{
+    border:2px solid var(--hint);background:#fdecec;border-radius:8px;
+    padding:14px 16px;margin:0 0 20px;font-size:14px;
+  }
+  .warn b{display:block;color:#8e1c1c;font-size:15px;margin-bottom:4px;}
+  .warn p{margin:0 0 10px;color:#8e1c1c;}
+  .warn .btn{padding:7px 18px;font-size:14px;}
+
   /* ===== 未入力チェック ===== */
   #validation-msg{
     border:1.5px solid var(--hint);background:#fdecec;color:#8e1c1c;
@@ -386,7 +395,14 @@ function fileStamp(){
 
 /* ================= 保存（localStorage への自動保存） ================= */
 const store = (() => {
-  const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+  let raw = null;
+  try {
+    raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+  } catch (e) {
+    // 保存データが壊れていても課題は開始できるようにする
+    console.error("保存データを読めなかったため、新規として開始します:", e);
+    return {};
+  }
   // 旧形式（回答だけのフラットな構造）からの移行
   if (raw && !raw.answers && !raw.log) return { answers: raw, log: null };
   return raw || {};
@@ -395,6 +411,7 @@ if (!store.answers) store.answers = {};
 if (!store.log) store.log = { startedAt:null, finishedAt:null, hints:[] };
 if (!store.log.hints) store.log.hints = [];      // 旧データからの移行
 if (!store.log.quiz)  store.log.quiz  = [];      // 理解度テストの回答
+if (!store.log.quizDone) store.log.quizDone = {}; // 出題済みの設問
 
 const answers = store.answers;
 const log = store.log;
@@ -492,9 +509,17 @@ function render(){
       '<div class="done-actions">' +
       '<button class="btn" id="dl-json">JSONを保存</button>' +
       '<button class="btn ghost" id="dl-csv">CSVを保存</button>' +
+      '</div>' +
+      '<p style="margin-top:34px;font-size:13px;">― 実験員の方へ ―<br>' +
+      'ファイルが保存されたことを確認してから、次の被験者へ進んでください。</p>' +
+      '<div class="done-actions">' +
+      '<button class="btn hint" id="next-subject">データを消去して次の被験者へ</button>' +
       '</div></div>';
     document.getElementById("dl-json").addEventListener("click", downloadJSON);
     document.getElementById("dl-csv").addEventListener("click", downloadCSV);
+    document.getElementById("next-subject").addEventListener("click", () => {
+      if (confirm("この被験者の入力内容を消去して、最初の画面に戻ります。\n\n書き出したファイルを保存済みか確認してください。\n続けますか？")) resetSession();
+    });
     foot.style.display = "none";
     setTimeout(exportAll, 400);   // 完了時に自動で書き出す
     return;
@@ -602,7 +627,8 @@ const QUIZ = (typeof QUIZZES !== "undefined" && QUIZZES && QUIZZES[PROBLEM_ID]) 
 if (PROBLEM && !Object.keys(QUIZ).length){
   console.error(`理解度テストの問題データ（QUIZZES["${PROBLEM_ID}"]）を読み込めませんでした。`);
 }
-const quizDone = {};          // 同じ設問で二度出さないための印
+// 出題済みの印。再読み込みされても二重に出題・記録しないよう保存に残す
+const quizDone = log.quizDone;
 let quizContext = null;       // { stepId, shownAt }
 
 function hasQuiz(stepId){
@@ -730,6 +756,16 @@ function setCodeVisible(visible){
   if (visible) fitCode();
 }
 
+// 前回の実施データが残っているか
+function hasSavedData(){
+  return Object.keys(answers).length > 0 || !!log.startedAt;
+}
+// この問題・条件の保存データを消して最初からやり直す
+function resetSession(){
+  localStorage.removeItem(STORAGE_KEY);
+  location.reload();
+}
+
 function renderIntro(){
   const frag = document.createDocumentFragment();
 
@@ -737,6 +773,26 @@ function renderIntro(){
   h.className = "q-title";
   h.textContent = "詳細設計書作成課題";
   frag.appendChild(h);
+
+  // 前の被験者の回答が残ったまま実施されるのを防ぐ
+  if (hasSavedData()){
+    const warn = document.createElement("div");
+    warn.className = "warn";
+    const id = answers["meta.subjectId"] || "（未入力）";
+    warn.innerHTML =
+      `<b>前回の入力が残っています</b>` +
+      `<p>被験者ID：${id}　／　開始時刻：${log.startedAt || "未開始"}<br>` +
+      `別の被験者で実施する場合は、必ず消去してから始めてください。</p>`;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn hint";
+    btn.textContent = "消去して新しい被験者で始める";
+    btn.addEventListener("click", () => {
+      if (confirm("保存されている入力内容をすべて消去します。\n書き出したファイルは消えません。\n\n続けますか？")) resetSession();
+    });
+    warn.appendChild(btn);
+    frag.appendChild(warn);
+  }
 
   const meta = document.createElement("div");
   meta.className = "meta-grid";
@@ -1099,7 +1155,8 @@ document.getElementById("next").addEventListener("click", () => {
 // 次のステップへ進む（理解度テストの回答後もここに戻ってくる）
 function advance(){
   // 「開始する」を押した時刻を記録する
-  if (STEPS[current].kind === "intro") log.startedAt = nowStamp();
+  // 途中で再読み込みされても最初の時刻を保つため、すでにあれば上書きしない
+  if (STEPS[current].kind === "intro" && !log.startedAt) log.startedAt = nowStamp();
 
   current++;
   if (STEPS[current].kind === "done") log.finishedAt = nowStamp();

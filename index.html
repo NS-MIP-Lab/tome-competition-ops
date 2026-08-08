@@ -57,6 +57,17 @@
     font-size:12px;color:var(--muted);
   }
   .note b{color:var(--text);}
+  .saved{
+    margin-top:14px;padding:12px 14px;border-radius:8px;
+    border:1.5px solid var(--hint);background:#fdecec;font-size:13px;color:#8e1c1c;
+  }
+  .saved b{display:block;margin-bottom:6px;font-size:14px;}
+  .saved ul{margin:0 0 10px;padding-left:1.3em;}
+  .saved button{
+    font-family:inherit;font-size:13px;font-weight:700;padding:7px 16px;border-radius:6px;
+    border:1px solid var(--hint);background:var(--hint);color:#fff;cursor:pointer;
+  }
+  .saved button:hover{background:#a91f1f;}
   #error{
     border:1.5px solid var(--hint);background:#fdecec;color:#8e1c1c;
     border-radius:8px;padding:12px 16px;font-size:14px;font-weight:600;
@@ -72,6 +83,7 @@
     <b>学習用</b>はヒントボタンがあり、押すと実験員に合図が表示されます。<br>
     <b>検証用</b>にヒントボタンはありません。<br>
     どちらの条件でも、回答内容は終了時に JSON と CSV で書き出されます。
+    <div id="saved"></div>
   </div>
 </main>
 
@@ -116,6 +128,59 @@ if (typeof PROBLEM_LIST === "undefined" || !PROBLEM_LIST.length){
   table.appendChild(tbody);
   menu.appendChild(table);
 }
+
+/* ===================================================================
+   前の被験者の入力が残っていないか確認する
+   残っていると、次の被験者が入力済みの画面から始めてしまう
+   =================================================================== */
+function listSaved(){
+  const found = [];
+  for (let i = 0; i < localStorage.length; i++){
+    const key = localStorage.key(i);
+    if (!key || key.indexOf("design-doc:") !== 0) continue;
+
+    let data = {}, broken = false;
+    try { data = JSON.parse(localStorage.getItem(key)) || {}; } catch (e) { broken = true; }
+    const answers = data.answers || {};
+    // 壊れたデータも消せるよう一覧に出す
+    if (!broken && !Object.keys(answers).length && !(data.log && data.log.startedAt)) continue;
+
+    const parts = key.split(":");            // design-doc : 問題ID : モード
+    const problem = (typeof PROBLEM_LIST !== "undefined"
+      && (PROBLEM_LIST.find(p => p.id === parts[1]) || {}).name) || parts[1];
+    found.push({
+      key,
+      label: `${problem}／${parts[2] === "learning" ? "学習用" : "検証用"}`,
+      subject: broken ? "（データ破損）" : (answers["meta.subjectId"] || "（IDなし）")
+    });
+  }
+  return found;
+}
+
+function renderSaved(){
+  const box = document.getElementById("saved");
+  const found = listSaved();
+  if (!found.length){ box.innerHTML = ""; return; }
+
+  box.className = "saved";
+  box.innerHTML =
+    "<b>前回の入力が残っています</b>"
+    + "<ul>" + found.map(f => `<li>${f.label}　被験者ID：${f.subject}</li>`).join("") + "</ul>"
+    + "新しい被験者で実施する前に消去してください。";
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.textContent = "すべて消去する";
+  btn.style.marginTop = "10px";
+  btn.addEventListener("click", () => {
+    if (!confirm("保存されている入力内容をすべて消去します。\n書き出したファイルは消えません。\n\n続けますか？")) return;
+    found.forEach(f => localStorage.removeItem(f.key));
+    renderSaved();
+  });
+  box.appendChild(btn);
+}
+
+renderSaved();
 </script>
 </body>
 </html>
