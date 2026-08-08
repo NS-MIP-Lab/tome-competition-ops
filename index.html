@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>詳細設計書作成課題</title>
+<style>
+  :root{
+    --bg:#f4f5f7;
+    --panel:#ffffff;
+    --border:#d8dbe0;
+    --text:#1f2328;
+    --muted:#6b7280;
+    --accent:#1f4e79;
+    --accent-dark:#163a5a;
+    --head:#1f4e79;
+    --hint:#c62828;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{
+    font-family:"Meiryo","Yu Gothic UI","Hiragino Kaku Gothic ProN",sans-serif;
+    background:var(--bg);color:var(--text);font-size:15px;line-height:1.7;
+    display:flex;align-items:center;justify-content:center;padding:24px;
+  }
+  main{
+    background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:40px 44px 34px;max-width:760px;width:100%;
+    box-shadow:0 2px 14px rgba(31,78,121,.07);
+    max-height:calc(100vh - 48px);overflow-y:auto;
+  }
+  h1{font-size:23px;color:var(--head);margin:0 0 6px;text-align:center;font-weight:700;}
+  .lead{margin:0 0 12px;text-align:center;color:var(--muted);font-size:14px;}
+
+  table.menu{border-collapse:collapse;width:100%;margin-top:18px;}
+  table.menu th{
+    background:var(--head);color:#fff;font-size:13px;font-weight:600;
+    padding:8px 12px;text-align:center;border:1px solid var(--head);
+  }
+  table.menu th:first-child{text-align:left;}
+  table.menu td{border:1px solid var(--border);padding:10px 12px;vertical-align:middle;}
+  table.menu td.name{background:#f7f8fa;font-weight:600;font-size:15px;}
+  table.menu td.name small{display:block;font-weight:400;font-size:12px;color:var(--muted);}
+  table.menu td.pick{width:26%;text-align:center;}
+
+  a.btn{
+    display:block;text-decoration:none;text-align:center;
+    font-family:inherit;font-size:15px;font-weight:700;padding:11px 12px;border-radius:7px;
+    border:1px solid var(--accent);background:var(--accent);color:#fff;
+  }
+  a.btn:hover{background:var(--accent-dark);border-color:var(--accent-dark);}
+  a.btn.learning{border-color:var(--hint);background:var(--hint);}
+  a.btn.learning:hover{background:#a91f1f;border-color:#a91f1f;}
+
+  .note{
+    margin-top:22px;padding-top:16px;border-top:1px solid var(--border);
+    font-size:12px;color:var(--muted);
+  }
+  .note b{color:var(--text);}
+  #error{
+    border:1.5px solid var(--hint);background:#fdecec;color:#8e1c1c;
+    border-radius:8px;padding:12px 16px;font-size:14px;font-weight:600;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>詳細設計書作成課題</h1>
+  <p class="lead">実施する問題と条件を選んでください。</p>
+  <div id="menu"></div>
+  <div class="note">
+    <b>学習用</b>はヒントボタンがあり、押すと実験員に合図が表示されます。<br>
+    <b>検証用</b>にヒントボタンはありません。<br>
+    どちらの条件でも、回答内容は終了時に JSON と CSV で書き出されます。
+  </div>
+</main>
+
+<!-- 問題の一覧。問題を追加するときは data/catalog.js に1行足してください -->
+<script src="data/catalog.js"></script>
+<script>
+const menu = document.getElementById("menu");
+
+if (typeof PROBLEM_LIST === "undefined" || !PROBLEM_LIST.length){
+  menu.innerHTML =
+    '<div id="error">問題の一覧（data/catalog.js）を読み込めませんでした。'
+    + 'index.html と同じ場所に data フォルダがあるか確認してください。</div>';
+} else {
+  const table = document.createElement("table");
+  table.className = "menu";
+  table.innerHTML =
+    "<thead><tr><th>問題</th><th>ヒントあり</th><th>ヒントなし</th></tr></thead>";
+
+  const tbody = document.createElement("tbody");
+  PROBLEM_LIST.forEach(p => {
+    const tr = document.createElement("tr");
+
+    const name = document.createElement("td");
+    name.className = "name";
+    name.innerHTML = `${p.name}<small>${p.id}</small>`;
+    tr.appendChild(name);
+
+    [["learning", "学習用", "btn learning"], ["test", "検証用", "btn"]].forEach(([mode, label, cls]) => {
+      const td = document.createElement("td");
+      td.className = "pick";
+      const a = document.createElement("a");
+      a.className = cls;
+      a.href = `design_doc.html?problem=${encodeURIComponent(p.id)}&mode=${mode}`;
+      a.textContent = label;
+      td.appendChild(a);
+      tr.appendChild(td);
+    });
+
+    tbody.appendChild(tr);
+  });
+
+  table.appendChild(tbody);
+  menu.appendChild(table);
+}
+</script>
+</body>
+</html>

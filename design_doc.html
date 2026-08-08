@@ -1,0 +1,1131 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>詳細設計書作成課題</title>
+<style>
+  :root{
+    --bg:#f4f5f7;
+    --panel:#ffffff;
+    --border:#d8dbe0;
+    --text:#1f2328;
+    --muted:#6b7280;
+    --accent:#1f4e79;
+    --accent-dark:#163a5a;
+    --head:#1f4e79;
+    --code-bg:#1e2430;
+    --code-text:#e6e9ef;
+    --code-gutter:#7c8798;
+    --hint:#c62828;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{
+    font-family:"Meiryo","Yu Gothic UI","Hiragino Kaku Gothic ProN",sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    font-size:15px;
+    line-height:1.7;
+    overflow:hidden;
+  }
+
+  /* ===== レイアウト：左右2分割 ===== */
+  #app{display:flex;height:100vh;width:100vw;}
+  #left{
+    width:50%;height:100vh;background:var(--code-bg);
+    display:flex;flex-direction:column;
+    overflow:hidden;                 /* 左ペインはスクロール不可 */
+  }
+  #right{
+    width:50%;height:100vh;
+    display:flex;flex-direction:column;
+    background:var(--panel);border-left:1px solid var(--border);
+  }
+
+  /* ===== 左：ソースコード（固定表示） ===== */
+  #left-head{
+    flex:0 0 auto;padding:10px 16px;color:#aeb7c4;
+    font-size:13px;letter-spacing:.04em;border-bottom:1px solid #2c3442;
+  }
+  #left-head strong{color:#e6e9ef;font-size:14px;font-weight:600;}
+  #code-wrap{flex:1 1 auto;overflow:hidden;padding:12px 16px 16px;display:flex;position:relative;}
+  /* 開始前はソースコードを隠す */
+  #code-mask{
+    position:absolute;inset:0;background:var(--code-bg);
+    display:flex;align-items:center;justify-content:center;
+    color:#8b95a5;font-size:14px;text-align:center;line-height:2;
+  }
+  #code{
+    font-family:Consolas,"Cascadia Mono","SF Mono",Menlo,monospace;
+    font-size:15px;line-height:1.55;color:var(--code-text);
+    white-space:pre;width:100%;
+    user-select:none;                /* 書き写し防止のため選択不可 */
+  }
+  #code .ln{
+    display:inline-block;width:2.6em;text-align:right;
+    margin-right:1.1em;color:var(--code-gutter);user-select:none;
+  }
+
+  /* ===== 右：設問エリア ===== */
+  #right-head{
+    flex:0 0 auto;padding:10px 24px;
+    border-bottom:1px solid var(--border);background:#fbfbfc;
+  }
+  #step-counter{display:block;text-align:right;font-size:13px;color:var(--muted);white-space:nowrap;}
+  #bar{height:4px;background:#e5e7eb;border-radius:2px;margin-top:8px;overflow:hidden;}
+  #bar > div{height:100%;width:0;background:var(--accent);transition:width .25s ease;}
+
+  #right-body{flex:1 1 auto;overflow-y:auto;padding:22px 24px 32px;}
+  #right-foot{
+    flex:0 0 auto;padding:12px 24px;border-top:1px solid var(--border);
+    background:#fbfbfc;display:flex;justify-content:space-between;align-items:center;gap:12px;
+  }
+  #save-state{font-size:12px;color:var(--muted);}
+
+  h2.q-title{font-size:19px;margin:0 0 6px;font-weight:700;color:var(--head);}
+  h3.q-sub{font-size:15px;margin:20px 0 8px;font-weight:700;color:var(--head);}
+  p.q-desc{margin:0 0 16px;color:#374151;font-size:14px;}
+  p.q-note{margin:16px 0 8px;font-size:14px;}
+
+  /* ===== 表 ===== */
+  table{border-collapse:collapse;width:100%;margin-bottom:14px;font-size:14px;table-layout:fixed;}
+  th,td{border:1px solid var(--border);padding:0;vertical-align:middle;}
+  th{background:var(--head);color:#fff;padding:8px 10px;font-weight:600;text-align:center;font-size:13px;}
+  td.label{background:#f7f8fa;padding:8px 10px;font-weight:500;word-break:break-word;}
+  td.center{text-align:center;}
+  tr.example td{background:#eef1f5;color:#5b6472;text-align:center;font-size:13px;}
+  td.cell{padding:0;}
+  .cellwrap{display:flex;align-items:center;gap:4px;padding:6px 10px;font-size:14px;}
+  .cellwrap .fixed{white-space:nowrap;color:#374151;}
+
+  textarea{
+    width:100%;border:none;outline:none;resize:none;padding:8px 10px;
+    font-family:inherit;font-size:14px;line-height:1.6;background:transparent;color:inherit;
+    overflow:hidden;display:block;
+  }
+  textarea:focus{background:#eff6ff;}
+  textarea.free{border:1px solid var(--border);border-radius:6px;background:#fff;min-height:120px;}
+
+  /* ===== 空欄（インライン入力） ===== */
+  input.blank{
+    font-family:inherit;font-size:14px;color:inherit;
+    border:none;border-bottom:1.5px solid #9aa3af;background:#fff;
+    padding:2px 6px;min-width:4em;text-align:center;outline:none;
+  }
+  input.blank:focus{background:#eff6ff;border-bottom-color:var(--accent);}
+
+  /* ===== 穴埋め文 ===== */
+  .fill{margin:0 0 12px;padding-left:14px;font-size:14px;line-height:2.4;}
+  .fill .lead{font-weight:700;color:var(--accent);margin-right:2px;}
+
+  /* ===== 選択肢 ===== */
+  .choices{display:inline-flex;gap:6px;flex-wrap:wrap;vertical-align:middle;}
+  .choices label{
+    display:inline-flex;align-items:center;gap:5px;
+    border:1px solid var(--border);border-radius:5px;
+    padding:3px 12px;background:#fff;cursor:pointer;font-size:14px;line-height:1.5;
+  }
+  .choices input{accent-color:var(--accent);margin:0;}
+  .choices label:has(input:checked){border-color:var(--accent);background:#eaf1f8;}
+
+  .btn{
+    font-family:inherit;font-size:15px;font-weight:600;padding:9px 26px;border-radius:6px;
+    border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;
+  }
+  .btn:hover{background:var(--accent-dark);border-color:var(--accent-dark);}
+  .btn.ghost{background:#fff;color:var(--accent);}
+  .btn.ghost:hover{background:#eaf1f8;}
+  .btn.hint{background:var(--hint);border-color:var(--hint);}
+  .btn.hint:hover{background:#a91f1f;border-color:#a91f1f;}
+
+  /* ===== ヒント要請の合図（数秒だけ大きく表示して消える） ===== */
+  #hint-flash{
+    position:fixed;inset:0;z-index:9999;
+    display:none;align-items:center;justify-content:center;
+    pointer-events:none;                    /* 表示中も入力を妨げない */
+    opacity:0;transition:opacity .25s ease;
+    background:rgba(198,40,40,.30);
+    animation:hint-pulse 1s ease-in-out infinite;
+  }
+  #hint-flash.on{opacity:1;}
+  @keyframes hint-pulse{
+    0%,100%{background:rgba(198,40,40,.18);}
+    50%    {background:rgba(198,40,40,.44);}
+  }
+  .hint-flash-inner{
+    background:var(--hint);color:#fff;border-radius:16px;
+    padding:36px 60px;text-align:center;
+    font-size:38px;font-weight:700;line-height:1.4;
+    box-shadow:0 10px 40px rgba(0,0,0,.35);
+  }
+  .hint-flash-inner span{display:block;margin-top:10px;font-size:18px;font-weight:600;opacity:.9;}
+
+  /* ===== 未入力チェック ===== */
+  #validation-msg{
+    border:1.5px solid var(--hint);background:#fdecec;color:#8e1c1c;
+    border-radius:8px;padding:10px 14px;margin:0 0 16px;font-size:14px;font-weight:600;
+  }
+  .missing-tag{
+    display:inline-block;margin-left:8px;padding:1px 9px;border-radius:99px;
+    background:var(--hint);color:#fff;font-size:11px;font-weight:700;
+    white-space:nowrap;vertical-align:middle;
+  }
+  td.cell .missing-tag{margin:0 0 6px 10px;}
+  textarea.free + .missing-tag{margin:6px 0 0;}
+  textarea.missing{background:#fff5f5;box-shadow:inset 0 0 0 2px var(--hint);}
+  input.blank.missing{
+    background:#fff5f5;border-bottom-color:var(--hint);
+    box-shadow:0 0 0 2px rgba(198,40,40,.18);
+  }
+  .meta-grid input.missing{background:#fff5f5;border-color:var(--hint);}
+  .choices.missing{outline:2px solid var(--hint);outline-offset:3px;border-radius:6px;}
+
+  /* ===== 理解度テスト ===== */
+  #quiz-overlay{
+    position:fixed;inset:0;z-index:9998;padding:24px;
+    display:none;align-items:center;justify-content:center;
+    background:rgba(20,26,34,.72);
+  }
+  #quiz-overlay.on{display:flex;}
+  .quiz-card{
+    background:var(--panel);border-radius:14px;width:100%;max-width:780px;
+    max-height:88vh;overflow-y:auto;padding:32px 36px 26px;
+    box-shadow:0 20px 60px rgba(0,0,0,.45);
+  }
+  .quiz-card h2{margin:0 0 4px;font-size:21px;color:var(--head);}
+  .quiz-lead{margin:0 0 22px;font-size:14px;color:var(--muted);}
+  .quiz-item{margin-bottom:24px;}
+  .quiz-q{margin:0 0 10px;font-size:15px;font-weight:700;}
+  .quiz-q .no{color:var(--head);margin-right:8px;}
+  .quiz-choices{display:grid;gap:8px;}
+  .quiz-choices label{
+    display:flex;align-items:flex-start;gap:10px;
+    border:1px solid var(--border);border-radius:8px;
+    padding:10px 14px;background:#fff;cursor:pointer;font-size:14px;line-height:1.6;
+  }
+  .quiz-choices label:hover{background:#f7f9fc;}
+  .quiz-choices label:has(input:checked){border-color:var(--accent);background:#eaf1f8;}
+  .quiz-choices input{accent-color:var(--accent);margin-top:4px;}
+  .quiz-item.missing .quiz-choices{outline:2px solid var(--hint);outline-offset:4px;border-radius:8px;}
+  .quiz-actions{display:flex;justify-content:flex-end;margin-top:8px;}
+  #quiz-msg{
+    border:1.5px solid var(--hint);background:#fdecec;color:#8e1c1c;
+    border-radius:8px;padding:10px 14px;margin:0 0 18px;font-size:14px;font-weight:600;
+  }
+
+  .foot-left{display:flex;align-items:center;gap:14px;}
+  .foot-right{display:flex;align-items:center;gap:10px;}
+  .linkbtn{
+    font-family:inherit;font-size:12px;color:var(--accent);
+    background:none;border:none;padding:0;text-decoration:underline;cursor:pointer;white-space:nowrap;
+  }
+  .done-actions{display:flex;gap:10px;justify-content:center;margin-top:24px;}
+
+  .meta-grid{display:grid;grid-template-columns:auto 1fr;gap:10px 14px;align-items:center;margin-bottom:20px;}
+  .meta-grid label{font-size:14px;font-weight:600;}
+  .meta-field{display:flex;align-items:center;}
+  .meta-grid input{
+    font-family:inherit;font-size:14px;padding:7px 10px;
+    border:1px solid var(--border);border-radius:6px;background:#fff;color:inherit;
+  }
+  .info{border:1px solid var(--border);border-radius:8px;background:#f7f8fa;padding:12px 16px;margin-bottom:20px;font-size:14px;}
+  .info dl{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;margin:0;}
+  .info dt{font-weight:600;}
+  .info dd{margin:0;}
+  ol.cautions{margin:0;padding-left:1.4em;font-size:14px;}
+  ol.cautions li{margin-bottom:6px;}
+
+  .scale-legend{font-size:13px;color:var(--muted);margin:8px 0 0;}
+  .scale{margin-top:10px;}
+
+  .done{text-align:center;padding:60px 20px;}
+  .done h2{font-size:22px;margin:0 0 12px;color:var(--head);}
+  .done p{color:var(--muted);}
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- ================= 左：ソースコード（固定） ================= -->
+  <section id="left">
+    <div id="left-head"><strong>対象ソースコード</strong></div>
+    <div id="code-wrap">
+      <pre id="code"></pre>
+      <div id="code-mask">「開始する」を押すと<br>ソースコードが表示されます</div>
+    </div>
+  </section>
+
+  <!-- ================= 右：設計書（1問ずつ） ================= -->
+  <section id="right">
+    <div id="right-head">
+      <span id="step-counter"></span>
+      <div id="bar"><div></div></div>
+    </div>
+    <div id="right-body"></div>
+    <div id="right-foot">
+      <div class="foot-left">
+        <span id="save-state">入力内容はこのブラウザに自動保存されます</span>
+        <button type="button" class="linkbtn" id="export-btn">ファイルに書き出す</button>
+      </div>
+      <div class="foot-right">
+        <button type="button" class="btn hint" id="hint-btn">ヒント</button>
+        <button class="btn" id="next">次へ進む</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- ヒント要請の合図（学習用のみ・数秒で自動的に消える） -->
+<div id="hint-flash">
+  <div class="hint-flash-inner">ヒントを要請しました<span>実験員をお呼びしています</span></div>
+</div>
+
+<!-- 理解度テスト（画面全体をふさぐ） -->
+<div id="quiz-overlay">
+  <div class="quiz-card">
+    <h2 id="quiz-title">理解度確認</h2>
+    <p class="quiz-lead">次の設問に進む前に、以下の問題に答えてください。</p>
+    <div id="quiz-body"></div>
+    <div class="quiz-actions">
+      <button class="btn" id="quiz-submit">回答して次へ進む</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================================
+     問題データ（data フォルダ）
+       catalog.js    … 問題の一覧（トップページのメニュー）
+       pN_problem.js … ソースコードと設問
+       pN_quiz.js    … 理解度テストの4択問題
+     問題を追加するときは、ここに2行足してください。
+     =================================================================== -->
+<script src="data/catalog.js"></script>
+<script src="data/p5_problem.js"></script>
+<script src="data/p5_quiz.js"></script>
+<script src="data/p3_problem.js"></script>
+<script src="data/p3_quiz.js"></script>
+<script src="data/p6_problem.js"></script>
+<script src="data/p6_quiz.js"></script>
+
+<script>
+/* ===================================================================
+   実施する問題とモード
+     design_doc.html?problem=p5&mode=learning
+       problem … data/catalog.js に登録した問題ID。省略時は p5
+       mode    … learning＝学習用（ヒントあり）／test＝検証用
+                 指定なし・不正値は検証用として扱う
+   =================================================================== */
+const params  = new URLSearchParams(location.search);
+const MODE    = params.get("mode") === "learning" ? "learning" : "test";
+const MODE_LABEL = MODE === "learning" ? "学習用" : "検証用";
+const PROBLEM_ID = params.get("problem") || "p5";
+
+// 問題データを取り出す。読み込めていなければ null（後段でエラー画面を出す）
+const PROBLEM = (typeof PROBLEMS !== "undefined" && PROBLEMS) ? PROBLEMS[PROBLEM_ID] : null;
+const LOAD_ERROR = !PROBLEM
+  ? `問題データを読み込めませんでした（problem=${PROBLEM_ID}）。`
+    + ` problem${PROBLEM_ID.replace(/^p/, "")}.js が同じフォルダにあり、`
+    + ` design_doc.html から読み込まれているか確認してください。`
+  : null;
+
+const ALGORITHM_NAME = PROBLEM ? PROBLEM.name : "";
+const SOURCE_CODE    = PROBLEM ? PROBLEM.source : "";
+const STEPS          = PROBLEM ? PROBLEM.steps : [];
+
+
+
+
+
+const QUESTION_COUNT = STEPS.filter(s => s.id).length;
+// 問題ごと・モードごとに保存先を分け、入力が混ざらないようにする
+const STORAGE_KEY = `design-doc:${PROBLEM_ID}:${MODE}`;
+
+/* ================= 左ペイン：行番号付きで描画し、はみ出さないよう自動縮小 ================= */
+function renderCode(){
+  const el = document.getElementById("code");
+  el.innerHTML = SOURCE_CODE.split("\n").map((line, i) => {
+    const esc = line.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    return `<span class="ln">${i + 1}</span>${esc}`;
+  }).join("\n");
+  fitCode();
+}
+function fitCode(){
+  const wrap = document.getElementById("code-wrap");
+  const el = document.getElementById("code");
+  let size = 16;
+  el.style.fontSize = size + "px";
+  while (size > 7 &&
+        (el.scrollHeight > wrap.clientHeight - 16 || el.scrollWidth > wrap.clientWidth - 8)) {
+    size -= 0.5;
+    el.style.fontSize = size + "px";
+  }
+}
+
+/* ================= 時刻 ================= */
+// ローカル時刻を「2026-08-08T18:43:12+09:00」の形で返す
+function nowStamp(){
+  const d = new Date();
+  const p = n => String(n).padStart(2, "0");
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? "+" : "-";
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`
+       + `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+       + `${sign}${p(Math.floor(Math.abs(off)/60))}:${p(Math.abs(off)%60)}`;
+}
+// 当日の日付を「2026-08-08」の形で返す（実施日の自動入力に使う）
+function todayISO(){
+  const d = new Date();
+  const p = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+}
+function fileStamp(){
+  const d = new Date();
+  const p = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
+}
+
+/* ================= 保存（localStorage への自動保存） ================= */
+const store = (() => {
+  const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+  // 旧形式（回答だけのフラットな構造）からの移行
+  if (raw && !raw.answers && !raw.log) return { answers: raw, log: null };
+  return raw || {};
+})();
+if (!store.answers) store.answers = {};
+if (!store.log) store.log = { startedAt:null, finishedAt:null, hints:[] };
+if (!store.log.hints) store.log.hints = [];      // 旧データからの移行
+if (!store.log.quiz)  store.log.quiz  = [];      // 理解度テストの回答
+
+const answers = store.answers;
+const log = store.log;
+
+let saveTimer = null;
+function save(){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  const s = document.getElementById("save-state");
+  s.textContent = "保存しました";
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    s.textContent = "入力内容はこのブラウザに自動保存されます";
+  }, 1500);
+}
+
+function bind(el, key){
+  el.value = answers[key] || "";
+  el.addEventListener("input", () => {
+    answers[key] = el.value;
+    if (el.value.trim()) clearMissing(el);
+    autoGrow(el);
+    save();
+  });
+  autoGrow(el);
+}
+function autoGrow(el){
+  if (el.tagName !== "TEXTAREA") return;
+  el.style.height = "auto";
+  el.style.height = Math.max(el.scrollHeight, el.classList.contains("free") ? 120 : 40) + "px";
+}
+
+/* ---- 部品 ---- */
+function makeBlank(key, width){
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "blank";
+  if (width) input.style.width = width;
+  setTimeout(() => bind(input, key), 0);
+  return input;
+}
+function makeChoices(key, options){
+  const box = document.createElement("span");
+  box.className = "choices";
+  options.forEach(opt => {
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = key;
+    input.value = opt;
+    if (answers[key] === opt) input.checked = true;
+    input.addEventListener("change", () => { answers[key] = opt; clearMissing(box); save(); });
+    label.appendChild(input);
+    label.appendChild(document.createTextNode(opt));
+    box.appendChild(label);
+  });
+  return box;
+}
+function makeArea(key){
+  const ta = document.createElement("textarea");
+  ta.rows = 1;
+  setTimeout(() => bind(ta, key), 0);
+  return ta;
+}
+
+/* ================= 右ペイン：1問ずつ描画 ================= */
+let current = 0;
+
+function render(){
+  const step = STEPS[current];
+  const body = document.getElementById("right-body");
+  const foot = document.getElementById("right-foot");
+  const counter = document.getElementById("step-counter");
+  body.innerHTML = "";
+  body.scrollTop = 0;
+
+  if (step.kind === "intro"){
+    counter.textContent = "はじめに";
+    setBar(0);
+    setCodeVisible(false);
+    setHintVisible(false);
+    body.appendChild(renderIntro());
+    document.getElementById("next").textContent = "開始する";
+    foot.style.display = "flex";
+    return;
+  }
+
+  if (step.kind === "done"){
+    counter.textContent = "完了";
+    setBar(1);
+    setHintVisible(false);
+    body.innerHTML =
+      '<div class="done"><h2>お疲れさまでした</h2>' +
+      '<p>すべての設問が終了しました。<br>回答ファイルの保存が始まります。<br>' +
+      'この画面のまま実施者にお知らせください。</p>' +
+      '<div class="done-actions">' +
+      '<button class="btn" id="dl-json">JSONを保存</button>' +
+      '<button class="btn ghost" id="dl-csv">CSVを保存</button>' +
+      '</div></div>';
+    document.getElementById("dl-json").addEventListener("click", downloadJSON);
+    document.getElementById("dl-csv").addEventListener("click", downloadCSV);
+    foot.style.display = "none";
+    setTimeout(exportAll, 400);   // 完了時に自動で書き出す
+    return;
+  }
+
+  const index = STEPS.slice(0, current + 1).filter(s => s.id).length;
+  counter.textContent = `第${index}問 / 全${QUESTION_COUNT}問`;
+  setBar(index / QUESTION_COUNT);
+  setCodeVisible(true);
+  setHintVisible(true);
+
+  const h = document.createElement("h2");
+  h.className = "q-title";
+  h.textContent = step.title;
+  body.appendChild(h);
+
+  if (step.desc){
+    const p = document.createElement("p");
+    p.className = "q-desc";
+    p.textContent = step.desc;
+    body.appendChild(p);
+  }
+
+  step.blocks.forEach((b, bi) => body.appendChild(renderBlock(step, b, bi)));
+
+  document.getElementById("next").textContent =
+    (current === STEPS.length - 2) ? "回答を終える" : "次へ進む";
+  foot.style.display = "flex";
+}
+
+function setBar(ratio){
+  document.querySelector("#bar > div").style.width = (ratio * 100) + "%";
+}
+
+/* ===================================================================
+   未入力チェック（学習用・検証用に共通）
+   その設問の入力欄がすべて埋まるまで次へ進めない
+   =================================================================== */
+// 未入力の要素を集める（記述欄・空欄・選択肢）
+function findMissing(){
+  const body = document.getElementById("right-body");
+  const missing = [];
+
+  body.querySelectorAll("textarea, input.blank, input.required-meta").forEach(el => {
+    if (!el.value.trim()) missing.push(el);
+  });
+
+  // 選択肢はラジオのグループ単位で判定する
+  const seen = new Set();
+  body.querySelectorAll(".choices").forEach(box => {
+    const radios = box.querySelectorAll("input[type=radio]");
+    if (!radios.length || seen.has(radios[0].name)) return;
+    seen.add(radios[0].name);
+    if (![...radios].some(r => r.checked)) missing.push(box);
+  });
+
+  // 画面に並んでいる順に返す
+  return missing.sort((a, b) =>
+    (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1);
+}
+
+// 「ここが空欄」の表示を付ける
+function markMissing(el){
+  if (el.classList.contains("missing")) return;
+  el.classList.add("missing");
+  const tag = document.createElement("span");
+  tag.className = "missing-tag";
+  tag.textContent = "未入力";
+  el.insertAdjacentElement("afterend", tag);
+}
+// 入力されたら、その欄の表示を消す
+function clearMissing(el){
+  if (!el.classList.contains("missing")) return;
+  el.classList.remove("missing");
+  const tag = el.nextElementSibling;
+  if (tag && tag.classList.contains("missing-tag")) tag.remove();
+  refreshMissingMsg();
+}
+
+// 画面上部の案内を出す・更新する・消す
+function refreshMissingMsg(count){
+  const body = document.getElementById("right-body");
+  const left = (count !== undefined) ? count : body.querySelectorAll(".missing").length;
+  let msg = document.getElementById("validation-msg");
+
+  if (!left){ if (msg) msg.remove(); return; }
+
+  if (!msg){
+    msg = document.createElement("div");
+    msg.id = "validation-msg";
+    body.insertBefore(msg, body.firstChild);
+  }
+  const btn = document.getElementById("next").textContent;   // 「次へ進む」「開始する」など
+  msg.textContent =
+    `未入力の欄が ${left} か所あります。「未入力」と示した欄をすべて埋めてから「${btn}」を押してください。`;
+}
+
+/* ===================================================================
+   理解度テスト
+   設問を終えて次へ進む直前に、画面全体をふさいで出題する
+   問題データは同じフォルダの quizN.js（QUIZZES）から読み込む
+   =================================================================== */
+// quizN.js が読み込まれていればその内容を使う（読めなければ出題しない）
+const QUIZ = (typeof QUIZZES !== "undefined" && QUIZZES && QUIZZES[PROBLEM_ID]) || {};
+if (PROBLEM && !Object.keys(QUIZ).length){
+  console.error(`理解度テストの問題データ（QUIZZES["${PROBLEM_ID}"]）を読み込めませんでした。`);
+}
+const quizDone = {};          // 同じ設問で二度出さないための印
+let quizContext = null;       // { stepId, shownAt }
+
+function hasQuiz(stepId){
+  return Array.isArray(QUIZ[stepId]) && QUIZ[stepId].length > 0 && !quizDone[stepId];
+}
+
+function openQuiz(stepId){
+  const items = QUIZ[stepId];
+  const body = document.getElementById("quiz-body");
+  body.innerHTML = "";
+
+  items.forEach((item, i) => {
+    const wrap = document.createElement("div");
+    wrap.className = "quiz-item";
+    wrap.dataset.index = i;
+
+    const q = document.createElement("p");
+    q.className = "quiz-q";
+    q.innerHTML = `<span class="no">問${i + 1}</span>`;
+    q.appendChild(document.createTextNode(item.question || ""));
+    wrap.appendChild(q);
+
+    const box = document.createElement("div");
+    box.className = "quiz-choices";
+    (item.choices || []).forEach((choice, ci) => {
+      const label = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = `quiz.${stepId}.${item.id || i}`;
+      input.value = String(ci);
+      input.addEventListener("change", () => {
+        wrap.classList.remove("missing");
+        const msg = document.getElementById("quiz-msg");
+        if (msg && !document.querySelectorAll(".quiz-item.missing").length) msg.remove();
+      });
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(`${ci + 1}. ${choice}`));
+      box.appendChild(label);
+    });
+    wrap.appendChild(box);
+    body.appendChild(wrap);
+  });
+
+  quizContext = { stepId, shownAt: nowStamp() };
+  document.getElementById("quiz-overlay").classList.add("on");
+  document.getElementById("quiz-body").scrollTop = 0;
+}
+
+// 「回答して次へ進む」：全問答えていなければ閉じない
+function submitQuiz(){
+  const items = QUIZ[quizContext.stepId];
+  const wraps = [...document.querySelectorAll("#quiz-body .quiz-item")];
+  const unanswered = wraps.filter(w => !w.querySelector("input:checked"));
+
+  if (unanswered.length){
+    unanswered.forEach(w => w.classList.add("missing"));
+    let msg = document.getElementById("quiz-msg");
+    if (!msg){
+      msg = document.createElement("div");
+      msg.id = "quiz-msg";
+      document.getElementById("quiz-body").insertAdjacentElement("beforebegin", msg);
+    }
+    msg.textContent = `未回答が ${unanswered.length} 問あります。すべて選んでから押してください。`;
+    unanswered[0].scrollIntoView({ behavior:"smooth", block:"center" });
+    return;
+  }
+
+  const answeredAt = nowStamp();
+  wraps.forEach((w, i) => {
+    const item = items[i];
+    const picked = Number(w.querySelector("input:checked").value);
+    const correct = (item.answer === null || item.answer === undefined)
+      ? "" : (picked === item.answer ? "正解" : "不正解");
+    log.quiz.push({
+      直前の設問: quizContext.stepId,
+      問題ID: item.id || `${quizContext.stepId}-${i + 1}`,
+      問題: item.question || "",
+      選択番号: picked + 1,
+      選択した選択肢: (item.choices || [])[picked] || "",
+      正解番号: (item.answer === null || item.answer === undefined) ? "" : item.answer + 1,
+      正誤: correct,
+      表示時刻: quizContext.shownAt,
+      回答時刻: answeredAt
+    });
+  });
+
+  quizDone[quizContext.stepId] = true;
+  document.getElementById("quiz-overlay").classList.remove("on");
+  const msg = document.getElementById("quiz-msg");
+  if (msg) msg.remove();
+  quizContext = null;
+  save();
+  advance();
+}
+
+/* ================= ヒント要請（学習用のみ） ================= */
+// 押した時刻とそのときの設問を記録し、実験員に気づいてもらうための合図を数秒間出す
+let hintTimer = null;
+function requestHint(){
+  const step = STEPS[current];
+  log.hints.push({ 通番: log.hints.length + 1, 時刻: nowStamp(), 設問: step.id || "" });
+  save();
+  showHintFlash();
+}
+function showHintFlash(){
+  const el = document.getElementById("hint-flash");
+  clearTimeout(hintTimer);                 // 連打されたら表示時間をリセットする
+  el.style.display = "flex";
+  void el.offsetWidth;                     // 再表示時もフェードインさせる
+  el.classList.add("on");
+  hintTimer = setTimeout(() => {
+    el.classList.remove("on");
+    hintTimer = setTimeout(() => { el.style.display = "none"; }, 300);
+  }, 4000);
+}
+// 学習用の設問ステップでだけヒントボタンを出す
+function setHintVisible(visible){
+  document.getElementById("hint-btn").style.display =
+    (MODE === "learning" && visible) ? "" : "none";
+}
+
+/* 開始前はソースコードを隠し、「開始する」を押してから表示する */
+function setCodeVisible(visible){
+  document.getElementById("code-mask").style.display = visible ? "none" : "flex";
+  if (visible) fitCode();
+}
+
+function renderIntro(){
+  const frag = document.createDocumentFragment();
+
+  const h = document.createElement("h2");
+  h.className = "q-title";
+  h.textContent = "詳細設計書作成課題";
+  frag.appendChild(h);
+
+  const meta = document.createElement("div");
+  meta.className = "meta-grid";
+  meta.innerHTML =
+    '<label for="subject-id">被験者ID</label>' +
+    '<div class="meta-field"><input id="subject-id" class="required-meta" type="text" placeholder="例：S01"></div>' +
+    '<label for="exam-date">実施日</label>' +
+    '<div class="meta-field"><input id="exam-date" type="date"></div>';
+  frag.appendChild(meta);
+
+  const info = document.createElement("div");
+  info.className = "info";
+  info.innerHTML =
+    '<dl><dt>想定時間</dt><dd>25分（上限30分）</dd>' +
+    '<dt>対象</dt><dd>C言語を学習済みの大学2～3年生</dd>' +
+    '<dt>作成項目</dt><dd>主要5項目＋補助1項目</dd></dl>';
+  frag.appendChild(info);
+
+  const sub = document.createElement("h3");
+  sub.className = "q-sub";
+  sub.style.marginTop = "0";
+  sub.textContent = "回答上の注意";
+  frag.appendChild(sub);
+
+  const ol = document.createElement("ol");
+  ol.className = "cautions";
+  [
+    "Q1からQ5まで、原則として順番に回答してください。前の設問で確認した内容を、後の設問で利用して構いません。",
+    "各回答欄では、指定された1つの観点について記入してください。数値、条件式、変数名、または短い文で構いません。",
+    "自由記述欄には文章の型を示しています。空欄部分をコードから判断できる内容で埋めてください。",
+    "コードの書き写しだけでなく、値がどのように変わるか、処理後にどの状態になるかが分かるように記入してください。",
+    "電卓、Web検索、生成AI、教科書、プログラムの実行環境などは使用しないでください。"
+  ].forEach(t => {
+    const li = document.createElement("li");
+    li.textContent = t;
+    ol.appendChild(li);
+  });
+  frag.appendChild(ol);
+
+  setTimeout(() => {
+    // 実施日は当日の日付を自動で入れる（必要なら被験者が直せる）
+    if (!answers["meta.date"]) answers["meta.date"] = todayISO();
+    bind(document.getElementById("subject-id"), "meta.subjectId");
+    bind(document.getElementById("exam-date"), "meta.date");
+    save();
+  }, 0);
+
+  return frag;
+}
+
+function renderBlock(step, b, bi){
+  const base = `${step.id}.b${bi}`;
+
+  if (b.type === "subhead"){
+    const h = document.createElement("h3");
+    h.className = "q-sub";
+    h.textContent = b.text;
+    return h;
+  }
+
+  if (b.type === "note"){
+    const p = document.createElement("p");
+    p.className = "q-note";
+    p.textContent = b.text;
+    return p;
+  }
+
+  if (b.type === "text"){
+    const ta = document.createElement("textarea");
+    ta.className = "free";
+    setTimeout(() => bind(ta, `${base}.${b.key}`), 0);
+    return ta;
+  }
+
+  if (b.type === "scale"){
+    const wrap = document.createElement("div");
+    const legend = document.createElement("p");
+    legend.className = "scale-legend";
+    legend.textContent =
+      "1：ほとんど理解できなかった　2：一部のみ　3：おおむね　4：ほぼ　5：十分に理解できた";
+    const box = document.createElement("div");
+    box.className = "scale";
+    box.appendChild(makeChoices(`${base}.${b.key}`, ["1","2","3","4","5"]));
+    wrap.appendChild(legend);
+    wrap.appendChild(box);
+    return wrap;
+  }
+
+  if (b.type === "fill"){
+    const p = document.createElement("p");
+    p.className = "fill";
+    if (b.lead){
+      const lead = document.createElement("span");
+      lead.className = "lead";
+      lead.textContent = b.lead;
+      p.appendChild(lead);
+    }
+    b.parts.forEach((part, pi) => {
+      if (typeof part === "string"){
+        p.appendChild(document.createTextNode(part));
+      } else if (part.c){
+        p.appendChild(makeChoices(`${base}.${part.key || "c" + pi}`, part.c));
+      } else {
+        p.appendChild(makeBlank(`${base}.${part.b}`, part.w));
+      }
+    });
+    return p;
+  }
+
+  /* ---- grid ---- */
+  const table = document.createElement("table");
+
+  if (b.widths){
+    const cg = document.createElement("colgroup");
+    b.widths.forEach(w => {
+      const col = document.createElement("col");
+      col.style.width = w;
+      cg.appendChild(col);
+    });
+    table.appendChild(cg);
+  }
+
+  const thead = document.createElement("thead");
+  const htr = document.createElement("tr");
+  b.headers.forEach(hh => {
+    const th = document.createElement("th");
+    th.textContent = hh;
+    htr.appendChild(th);
+  });
+  thead.appendChild(htr);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  b.rows.forEach((row, ri) => {
+    const tr = document.createElement("tr");
+    if (row.example) tr.className = "example";
+
+    row.cells.forEach((cell, ci) => {
+      const td = document.createElement("td");
+      const key = `${base}.r${ri}.c${ci}`;
+
+      if (typeof cell === "string"){
+        // 固定表示セル
+        td.className = row.example ? "" : (ci === 0 ? "label" : "label center");
+        td.textContent = cell;
+      } else if (cell === null){
+        // 記述欄
+        td.className = "cell";
+        td.appendChild(makeArea(key));
+      } else if (cell.choice){
+        // 選択肢
+        td.className = "cell";
+        const w = document.createElement("div");
+        w.className = "cellwrap";
+        w.appendChild(makeChoices(key, cell.choice));
+        td.appendChild(w);
+      } else {
+        // 前後の文字つき空欄　例：prime[ ___ ]
+        td.className = "cell";
+        const w = document.createElement("div");
+        w.className = "cellwrap";
+        if (cell.pre){
+          const s = document.createElement("span");
+          s.className = "fixed";
+          s.textContent = cell.pre;
+          w.appendChild(s);
+        }
+        w.appendChild(makeBlank(key, cell.w));
+        if (cell.suf){
+          const s = document.createElement("span");
+          s.className = "fixed";
+          s.textContent = cell.suf;
+          w.appendChild(s);
+        }
+        td.appendChild(w);
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  return table;
+}
+
+/* ===================================================================
+   書き出し用インデックス
+   STEPS を走査して「入力欄のキー → どの設問のどの項目か」の一覧を作る。
+   未回答の欄も含めて全項目が並ぶので、被験者間で列が揃う。
+   =================================================================== */
+function buildFieldIndex(){
+  const list = [];
+  list.push({stepId:"meta", stepTitle:"表紙", section:"", item:"被験者ID",  blankNo:"", key:"meta.subjectId"});
+  list.push({stepId:"meta", stepTitle:"表紙", section:"", item:"実施日",    blankNo:"", key:"meta.date"});
+
+  STEPS.forEach(step => {
+    if (!step.id) return;
+    let section = "";
+
+    step.blocks.forEach((b, bi) => {
+      const base = `${step.id}.b${bi}`;
+
+      if (b.type === "subhead"){ section = b.text; return; }
+      if (b.type === "note") return;
+
+      if (b.type === "text"){
+        list.push({stepId:step.id, stepTitle:step.title, section, item:"自由記述", blankNo:"", key:`${base}.${b.key}`});
+        return;
+      }
+      if (b.type === "scale"){
+        list.push({stepId:step.id, stepTitle:step.title, section, item:"理解度（1〜5）", blankNo:"", key:`${base}.${b.key}`});
+        return;
+      }
+      if (b.type === "fill"){
+        // 文章全体を項目名にし、空欄には通し番号を振る
+        const sentence = (b.lead || "") + b.parts.map(p =>
+          typeof p === "string" ? p : (p.c ? `〔${p.c.join("・")}〕` : "＿＿")
+        ).join("");
+        let n = 0;
+        b.parts.forEach((p, pi) => {
+          if (typeof p === "string") return;
+          n++;
+          const key = p.c ? `${base}.${p.key || "c" + pi}` : `${base}.${p.b}`;
+          list.push({stepId:step.id, stepTitle:step.title, section, item:sentence, blankNo:n, key});
+        });
+        return;
+      }
+
+      // grid
+      b.rows.forEach((row, ri) => {
+        if (row.example) return;                       // 記入例の行は対象外
+        // 固定表示のセルから行名を作る（複数あるときは「見出し=値」の形にする）
+        const fixed = row.cells
+          .map((c, ci) => typeof c === "string" ? {h: b.headers[ci] || "", v: c} : null)
+          .filter(Boolean);
+        const rowLabel = fixed.length === 1
+          ? fixed[0].v
+          : fixed.map(x => `${x.h}=${x.v}`).join(" ");
+        row.cells.forEach((cell, ci) => {
+          if (typeof cell === "string") return;        // 固定表示セル
+          const header = b.headers[ci] || "";
+          const item = rowLabel ? `${rowLabel} / ${header}` : header;
+          list.push({stepId:step.id, stepTitle:step.title, section, item, blankNo:"", key:`${base}.r${ri}.c${ci}`});
+        });
+      });
+    });
+  });
+  return list;
+}
+
+/* ================= ファイル書き出し ================= */
+function baseName(){
+  const id = (answers["meta.subjectId"] || "noID").replace(/[^\w\-一-龠ぁ-んァ-ヶ]/g, "_");
+  return `design_${PROBLEM_ID}_${MODE}_${id}_${fileStamp()}`;
+}
+function download(filename, mime, text){
+  const blob = new Blob([text], {type: mime});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function csv(rows){
+  const esc = v => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
+  // Excel で文字化けしないよう BOM を付ける
+  return "﻿" + rows.map(r => r.map(esc).join(",")).join("\r\n");
+}
+
+// 書き出す情報：モード・アルゴリズム名・被験者ID・実施日・開始時刻・回答終了時刻
+//               ヒント要請回数・最終的な回答
+function header(){
+  return {
+    モード: MODE_LABEL,
+    アルゴリズム: ALGORITHM_NAME,
+    被験者ID: answers["meta.subjectId"] || "",
+    実施日: answers["meta.date"] || "",
+    開始時刻: log.startedAt || "",
+    回答終了時刻: log.finishedAt || "",
+    ヒント要請回数: log.hints.length,
+    理解度テスト正解数: log.quiz.filter(q => q.正誤 === "正解").length,
+    理解度テスト出題数: log.quiz.length
+  };
+}
+
+function downloadJSON(){
+  const payload = Object.assign(header(), {
+    ヒント要請: log.hints,
+    理解度テスト: log.quiz,
+    回答: buildFieldIndex()
+      .filter(f => f.stepId !== "meta")
+      .map(f => ({
+        設問: f.stepId, 区分: f.section, 項目: f.item, 空欄: f.blankNo,
+        回答: answers[f.key] || "", キー: f.key
+      }))
+  });
+  download(baseName() + ".json", "application/json", JSON.stringify(payload, null, 2));
+}
+
+function downloadCSV(){
+  const h = header();
+  const meta = [h.モード, h.アルゴリズム, h.被験者ID, h.実施日, h.開始時刻, h.回答終了時刻,
+                h.ヒント要請回数, `${h.理解度テスト正解数}/${h.理解度テスト出題数}`];
+  const rows = [["モード","アルゴリズム","被験者ID","実施日","開始時刻","回答終了時刻","ヒント要請回数",
+                 "理解度テスト正解数","設問","区分","項目","空欄","回答"]];
+
+  buildFieldIndex()
+    .filter(f => f.stepId !== "meta")
+    .forEach(f => {
+      rows.push(meta.concat([f.stepId, f.section, f.item, f.blankNo, answers[f.key] || ""]));
+    });
+
+  // ヒント要請は表の末尾に追記する（検証用ではこの行は出ない）
+  log.hints.forEach(x => {
+    rows.push(meta.concat(["ヒント要請", x.設問, `通番${x.通番}`, "", x.時刻]));
+  });
+
+  // 理解度テストも末尾に追記する
+  log.quiz.forEach(x => {
+    rows.push(meta.concat(["理解度テスト", x.直前の設問, `${x.問題ID}｜${x.問題}`, x.正誤,
+      `${x.選択番号}. ${x.選択した選択肢}（正解 ${x.正解番号}）／回答 ${x.回答時刻}`]));
+  });
+
+  download(baseName() + ".csv", "text/csv", csv(rows));
+}
+
+function exportAll(){
+  downloadJSON();
+  setTimeout(downloadCSV, 500);
+}
+
+document.getElementById("export-btn").addEventListener("click", exportAll);
+document.getElementById("hint-btn").addEventListener("click", requestHint);
+
+/* ================= 遷移 ================= */
+document.getElementById("next").addEventListener("click", () => {
+  if (current >= STEPS.length - 1) return;
+
+  // すべて埋まるまで次へ進めない（「はじめに」の被験者IDも対象）
+  const missing = findMissing();
+  if (missing.length){
+    missing.forEach(markMissing);
+    refreshMissingMsg(missing.length);
+    missing[0].scrollIntoView({ behavior:"smooth", block:"center" });
+    return;
+  }
+
+  // 設問を終えた直後に理解度テストがあれば、先にそれを出す
+  const step = STEPS[current];
+  if (step.id && hasQuiz(step.id)){
+    openQuiz(step.id);
+    return;
+  }
+
+  advance();
+});
+
+// 次のステップへ進む（理解度テストの回答後もここに戻ってくる）
+function advance(){
+  // 「開始する」を押した時刻を記録する
+  if (STEPS[current].kind === "intro") log.startedAt = nowStamp();
+
+  current++;
+  if (STEPS[current].kind === "done") log.finishedAt = nowStamp();
+
+  save();
+  render();
+}
+
+document.getElementById("quiz-submit").addEventListener("click", submitQuiz);
+
+window.addEventListener("resize", fitCode);
+
+if (LOAD_ERROR){
+  // 問題データが無いまま実験を進めさせない
+  document.getElementById("right-body").innerHTML =
+    '<div id="validation-msg"></div>' +
+    '<p class="q-desc">トップページ（index.html）から選び直してください。</p>';
+  document.querySelector("#validation-msg").textContent = LOAD_ERROR;
+  document.getElementById("right-foot").style.display = "none";
+  document.getElementById("code-mask").textContent = "問題データを読み込めませんでした";
+  console.error(LOAD_ERROR);
+} else {
+  renderCode();
+  render();
+  save();
+}
+</script>
+</body>
+</html>
