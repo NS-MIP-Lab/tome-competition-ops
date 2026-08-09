@@ -62,6 +62,16 @@
     border:1.5px solid var(--hint);background:#fdecec;font-size:13px;color:#8e1c1c;
   }
   .saved b{display:block;margin-bottom:6px;font-size:14px;}
+  .lsl{
+    margin-top:14px;padding:10px 14px;border-radius:8px;
+    border:1px solid var(--border);font-size:13px;
+    display:flex;align-items:center;gap:9px;
+  }
+  .lsl .dot{width:10px;height:10px;border-radius:50%;flex:0 0 auto;background:var(--muted);}
+  .lsl.ok{border-color:#1b7f3b;background:#eefaf1;color:#155e2c;}
+  .lsl.ok .dot{background:#1b7f3b;}
+  .lsl.ng{border-color:var(--hint);background:#fdecec;color:#8e1c1c;}
+  .lsl.ng .dot{background:var(--hint);}
   .saved ul{margin:0 0 10px;padding-left:1.3em;}
   .saved button{
     font-family:inherit;font-size:13px;font-weight:700;padding:7px 16px;border-radius:6px;
@@ -83,12 +93,14 @@
     <b>学習用</b>はヒントボタンがあり、押すと実験員に合図が表示されます。<br>
     <b>検証用</b>にヒントボタンはありません。<br>
     どちらの条件でも、回答内容は終了時に JSON と CSV で書き出されます。
+    <div id="lsl"></div>
     <div id="saved"></div>
   </div>
 </main>
 
 <!-- 問題の一覧。問題を追加するときは data/catalog.js に1行足してください -->
 <script src="data/catalog.js"></script>
+<script src="lsl.js"></script>
 <script>
 const menu = document.getElementById("menu");
 
@@ -181,6 +193,19 @@ function renderSaved(){
 }
 
 renderSaved();
+
+/* 生体計測と同期する構成で開いているかを、実験員が一目で分かるようにする */
+if (LSL.enabled){
+  const lslBox = document.getElementById("lsl");
+  LSL.onStatus(ok => {
+    lslBox.className = "lsl " + (ok ? "ok" : "ng");
+    lslBox.innerHTML = ok
+      ? '<span class="dot"></span><span><b>生体計測と同期する構成です。</b>'
+        + 'マーカーの送信先に接続済みです。</span>'
+      : '<span class="dot"></span><span><b>マーカーの送信先に接続できていません。</b>'
+        + ' lsl_bridge/bridge.py を起動してください。</span>';
+  });
+}
 </script>
 </body>
 </html>
