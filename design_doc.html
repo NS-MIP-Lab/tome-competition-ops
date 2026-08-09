@@ -518,7 +518,7 @@ function render(){
     document.getElementById("dl-json").addEventListener("click", downloadJSON);
     document.getElementById("dl-csv").addEventListener("click", downloadCSV);
     document.getElementById("next-subject").addEventListener("click", () => {
-      if (confirm("この被験者の入力内容を消去して、最初の画面に戻ります。\n\n書き出したファイルを保存済みか確認してください。\n続けますか？")) resetSession();
+      if (confirm("この被験者の入力内容を消去して、問題と条件を選ぶ画面に戻ります。\n\n書き出したファイルを保存済みか確認してください。\n続けますか？")) resetAndGoTop();
     });
     foot.style.display = "none";
     setTimeout(exportAll, 400);   // 完了時に自動で書き出す
@@ -760,10 +760,15 @@ function setCodeVisible(visible){
 function hasSavedData(){
   return Object.keys(answers).length > 0 || !!log.startedAt;
 }
-// この問題・条件の保存データを消して最初からやり直す
+// この問題・条件の保存データを消して、同じ課題を最初からやり直す
 function resetSession(){
   localStorage.removeItem(STORAGE_KEY);
   location.reload();
+}
+// 保存データを消して、問題と条件を選ぶトップページへ戻る
+function resetAndGoTop(){
+  localStorage.removeItem(STORAGE_KEY);
+  location.href = "index.html";
 }
 
 function renderIntro(){
