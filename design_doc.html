@@ -370,7 +370,36 @@ function fitCode(){
   }
 }
 
-/* ================= 時刻 ================= */
+/* ===================================================================
+   時刻
+
+   3つの形で記録する。
+     ISO 文字列   … 人が読んで確認するため
+     Unix ミリ秒  … 他の記録（Garmin の CSV、動画、実験ノート）との突き合わせ
+     経過ミリ秒   … 解析の主役。「開始する」を押した瞬間を 0 とする
+
+   LSL の時刻（local_clock）は Unix 時刻ではなく起動基準の単調時計なので、
+   Unix 時刻では直接対応づけられない。開始時点を基準にした経過時間があれば
+       LSL 上の時刻 ≒ 開始マーカーの LSL 時刻 + 経過ミリ秒 / 1000
+   で全イベントを LSL の時間軸に載せられる。
+
+   経過時間は performance.now() から求める。Date.now() の差分だと、
+   セッション中に時刻補正（NTP）が入ったときに値が飛ぶ。
+   =================================================================== */
+
+let startPerf = null;      // 「開始する」を押した時点の performance.now()
+
+// Unix ミリ秒。Python の time.time() と比べるときは 1000 で割る
+function nowUnix(){ return Date.now(); }
+
+// 開始からの経過ミリ秒。まだ開始していなければ null
+function elapsedMs(){
+  if (startPerf !== null) return Math.round(performance.now() - startPerf);
+  // 再読み込み後は performance.now() の基準が失われるため、壁時計で代用する
+  if (log && log.startedUnix) return Date.now() - log.startedUnix;
+  return null;
+}
+
 // ローカル時刻を「2026-08-08T18:43:12+09:00」の形で返す
 function nowStamp(){
   const d = new Date();
@@ -672,7 +701,12 @@ function openQuiz(stepId){
     body.appendChild(wrap);
   });
 
-  quizContext = { stepId, shownAt: nowStamp() };
+  quizContext = {
+    stepId,
+    shownAt: nowStamp(),
+    shownUnix: nowUnix(),
+    shownElapsed: elapsedMs()
+  };
   document.getElementById("quiz-overlay").classList.add("on");
   document.getElementById("quiz-body").scrollTop = 0;
 }
@@ -696,7 +730,9 @@ function submitQuiz(){
     return;
   }
 
-  const answeredAt = nowStamp();
+  const answeredAt      = nowStamp();
+  const answeredUnix    = nowUnix();
+  const answeredElapsed = elapsedMs();
   wraps.forEach((w, i) => {
     const item = items[i];
     const picked = Number(w.querySelector("input:checked").value);
@@ -711,7 +747,11 @@ function submitQuiz(){
       正解番号: (item.answer === null || item.answer === undefined) ? "" : item.answer + 1,
       正誤: correct,
       表示時刻: quizContext.shownAt,
-      回答時刻: answeredAt
+      表示Unix時刻: quizContext.shownUnix,
+      表示経過ミリ秒: quizContext.shownElapsed,
+      回答時刻: answeredAt,
+      回答Unix時刻: answeredUnix,
+      回答経過ミリ秒: answeredElapsed
     });
   });
 
@@ -729,7 +769,13 @@ function submitQuiz(){
 let hintTimer = null;
 function requestHint(){
   const step = STEPS[current];
-  log.hints.push({ 通番: log.hints.length + 1, 時刻: nowStamp(), 設問: step.id || "" });
+  log.hints.push({
+    通番: log.hints.length + 1,
+    設問: step.id || "",
+    時刻: nowStamp(),
+    Unix時刻: nowUnix(),
+    経過ミリ秒: elapsedMs()
+  });
   save();
   showHintFlash();
 }
@@ -1069,8 +1115,10 @@ function csv(rows){
   return "﻿" + rows.map(r => r.map(esc).join(",")).join("\r\n");
 }
 
-// 書き出す情報：モード・アルゴリズム名・被験者ID・実施日・開始時刻・回答終了時刻
+// 書き出す情報：モード・アルゴリズム名・被験者ID・実施日・各時刻
 //               ヒント要請回数・最終的な回答
+// 時刻は ISO 文字列（確認用）・Unix ミリ秒（他の記録との突き合わせ用）・
+// 経過ミリ秒（解析用。開始を 0 とする）の3種類を記録する
 function header(){
   return {
     モード: MODE_LABEL,
@@ -1078,7 +1126,10 @@ function header(){
     被験者ID: answers["meta.subjectId"] || "",
     実施日: answers["meta.date"] || "",
     開始時刻: log.startedAt || "",
+    開始Unix時刻: log.startedUnix || "",
     回答終了時刻: log.finishedAt || "",
+    回答終了Unix時刻: log.finishedUnix || "",
+    所要ミリ秒: (log.finishedElapsedMs == null) ? "" : log.finishedElapsedMs,
     ヒント要請回数: log.hints.length,
     理解度テスト正解数: log.quiz.filter(q => q.正誤 === "正解").length,
     理解度テスト出題数: log.quiz.length
@@ -1101,10 +1152,12 @@ function downloadJSON(){
 
 function downloadCSV(){
   const h = header();
-  const meta = [h.モード, h.アルゴリズム, h.被験者ID, h.実施日, h.開始時刻, h.回答終了時刻,
+  const meta = [h.モード, h.アルゴリズム, h.被験者ID, h.実施日, h.開始時刻, h.開始Unix時刻,
+                h.回答終了時刻, h.所要ミリ秒,
                 h.ヒント要請回数, `${h.理解度テスト正解数}/${h.理解度テスト出題数}`];
-  const rows = [["モード","アルゴリズム","被験者ID","実施日","開始時刻","回答終了時刻","ヒント要請回数",
-                 "理解度テスト正解数","設問","区分","項目","空欄","回答"]];
+  const rows = [["モード","アルゴリズム","被験者ID","実施日","開始時刻","開始Unix時刻",
+                 "回答終了時刻","所要ミリ秒","ヒント要請回数",
+                 "理解度テスト正解数","設問","区分","項目","経過ミリ秒","回答"]];
 
   buildFieldIndex()
     .filter(f => f.stepId !== "meta")
@@ -1114,13 +1167,15 @@ function downloadCSV(){
 
   // ヒント要請は表の末尾に追記する（検証用ではこの行は出ない）
   log.hints.forEach(x => {
-    rows.push(meta.concat(["ヒント要請", x.設問, `通番${x.通番}`, "", x.時刻]));
+    rows.push(meta.concat(["ヒント要請", x.設問, `通番${x.通番}`,
+      x.経過ミリ秒 == null ? "" : x.経過ミリ秒, x.時刻]));
   });
 
   // 理解度テストも末尾に追記する
   log.quiz.forEach(x => {
-    rows.push(meta.concat(["理解度テスト", x.直前の設問, `${x.問題ID}｜${x.問題}`, x.正誤,
-      `${x.選択番号}. ${x.選択した選択肢}（正解 ${x.正解番号}）／回答 ${x.回答時刻}`]));
+    rows.push(meta.concat(["理解度テスト", x.直前の設問, `${x.問題ID}｜${x.問題}`,
+      x.回答経過ミリ秒 == null ? "" : x.回答経過ミリ秒,
+      `${x.選択番号}. ${x.選択した選択肢}（正解 ${x.正解番号}）／${x.正誤}／回答 ${x.回答時刻}`]));
   });
 
   download(baseName() + ".csv", "text/csv", csv(rows));
@@ -1159,12 +1214,22 @@ document.getElementById("next").addEventListener("click", () => {
 
 // 次のステップへ進む（理解度テストの回答後もここに戻ってくる）
 function advance(){
-  // 「開始する」を押した時刻を記録する
-  // 途中で再読み込みされても最初の時刻を保つため、すでにあれば上書きしない
-  if (STEPS[current].kind === "intro" && !log.startedAt) log.startedAt = nowStamp();
+  // 「開始する」を押した時刻を記録する。ここが経過時間の 0 点になる
+  if (STEPS[current].kind === "intro"){
+    // 途中で再読み込みされても最初の時刻を保つため、すでにあれば上書きしない
+    if (!log.startedAt){
+      log.startedAt   = nowStamp();
+      log.startedUnix = nowUnix();
+    }
+    startPerf = performance.now();
+  }
 
   current++;
-  if (STEPS[current].kind === "done") log.finishedAt = nowStamp();
+  if (STEPS[current].kind === "done"){
+    log.finishedAt        = nowStamp();
+    log.finishedUnix      = nowUnix();
+    log.finishedElapsedMs = elapsedMs();
+  }
 
   save();
   render();
