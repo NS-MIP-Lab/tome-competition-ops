@@ -161,22 +161,6 @@
   }
   .hint-flash-inner span{display:block;margin-top:10px;font-size:18px;font-weight:600;opacity:.9;}
 
-  /* ===== 生体計測との同期状態 ===== */
-  .lsl-state{
-    display:flex;align-items:center;gap:10px;
-    border:1px solid var(--border);border-radius:8px;
-    padding:10px 14px;margin:0 0 20px;font-size:13px;
-  }
-  .lsl-state .dot{
-    width:11px;height:11px;border-radius:50%;flex:0 0 auto;
-    background:var(--muted);
-  }
-  .lsl-state.ok{border-color:#1b7f3b;background:#eefaf1;color:#155e2c;}
-  .lsl-state.ok .dot{background:#1b7f3b;}
-  .lsl-state.ng{border-color:var(--hint);background:#fdecec;color:#8e1c1c;}
-  .lsl-state.ng .dot{background:var(--hint);}
-  .lsl-state b{font-weight:700;}
-
   /* ===== 前回データの警告（被験者の取り違え防止） ===== */
   .warn{
     border:2px solid var(--hint);background:#fdecec;border-radius:8px;
@@ -332,9 +316,6 @@
 <script src="data/p6_problem.js"></script>
 <script src="data/p6_quiz.js"></script>
 
-<!-- 生体計測との同期。lsl_bridge/bridge.py 経由で LSL マーカーを流す -->
-<script src="lsl.js"></script>
-
 <script>
 /* ===================================================================
    実施する問題とモード
@@ -434,13 +415,6 @@ if (!store.log.quizDone) store.log.quizDone = {}; // 出題済みの設問
 
 const answers = store.answers;
 const log = store.log;
-
-// マーカーに毎回添える情報。どの被験者・どの条件のイベントか XDF 側で分かるようにする
-LSL.setContext(() => ({
-  problem: PROBLEM_ID,
-  mode: MODE,
-  subject: answers["meta.subjectId"] || ""
-}));
 
 let saveTimer = null;
 function save(){
@@ -556,7 +530,6 @@ function render(){
   setBar(index / QUESTION_COUNT);
   setCodeVisible(true);
   setHintVisible(true);
-  LSL.mark("step_enter", { step: step.id, index });
 
   const h = document.createElement("h2");
   h.className = "q-title";
@@ -700,7 +673,6 @@ function openQuiz(stepId){
   });
 
   quizContext = { stepId, shownAt: nowStamp() };
-  LSL.mark("quiz_open", { step: stepId, items: items.length });
   document.getElementById("quiz-overlay").classList.add("on");
   document.getElementById("quiz-body").scrollTop = 0;
 }
@@ -743,13 +715,6 @@ function submitQuiz(){
     });
   });
 
-  const correct = wraps.filter((w, i) => {
-    const item = items[i];
-    if (item.answer === null || item.answer === undefined) return false;
-    return Number(w.querySelector("input:checked").value) === item.answer;
-  }).length;
-  LSL.mark("quiz_submit", { step: quizContext.stepId, correct, total: wraps.length });
-
   quizDone[quizContext.stepId] = true;
   document.getElementById("quiz-overlay").classList.remove("on");
   const msg = document.getElementById("quiz-msg");
@@ -764,15 +729,7 @@ function submitQuiz(){
 let hintTimer = null;
 function requestHint(){
   const step = STEPS[current];
-  const seq = log.hints.length + 1;
-  const marker = LSL.mark("hint", { seq_hint: seq, step: step.id || "" });
-  log.hints.push({
-    通番: seq,
-    時刻: nowStamp(),
-    設問: step.id || "",
-    // LSL 時刻はブリッジの応答後に確定するため、通番で対応づける
-    LSLマーカー通番: marker ? marker.通番 : ""
-  });
+  log.hints.push({ 通番: log.hints.length + 1, 時刻: nowStamp(), 設問: step.id || "" });
   save();
   showHintFlash();
 }
@@ -821,21 +778,6 @@ function renderIntro(){
   h.className = "q-title";
   h.textContent = "詳細設計書作成課題";
   frag.appendChild(h);
-
-  // 生体計測と同期するときは、ブリッジにつながっていることを実験員に示す
-  if (LSL.enabled){
-    const box = document.createElement("div");
-    box.className = "lsl-state";
-    frag.appendChild(box);
-    LSL.onStatus(ok => {
-      box.className = "lsl-state " + (ok ? "ok" : "ng");
-      box.innerHTML = ok
-        ? '<span class="dot"></span><span><b>生体計測と同期します</b>　'
-          + 'マーカーの送信先に接続済みです。</span>'
-        : '<span class="dot"></span><span><b>マーカーの送信先に接続できていません</b>　'
-          + 'lsl_bridge/bridge.py を起動してください。接続するまで開始できません。</span>';
-    });
-  }
 
   // 前の被験者の回答が残ったまま実施されるのを防ぐ
   if (hasSavedData()){
@@ -1127,15 +1069,8 @@ function csv(rows){
   return "﻿" + rows.map(r => r.map(esc).join(",")).join("\r\n");
 }
 
-// 送ったマーカーの通番から LSL 時刻を引く（XDF と突き合わせるため）
-function lslTimeOf(seq){
-  if (seq == null || seq === "") return "";
-  const m = LSL.markers.find(x => x.通番 === seq);
-  return m ? m.lsl時刻 : "";
-}
-
 // 書き出す情報：モード・アルゴリズム名・被験者ID・実施日・開始時刻・回答終了時刻
-//               LSL 同期情報・ヒント要請回数・最終的な回答
+//               ヒント要請回数・最終的な回答
 function header(){
   return {
     モード: MODE_LABEL,
@@ -1144,9 +1079,6 @@ function header(){
     実施日: answers["meta.date"] || "",
     開始時刻: log.startedAt || "",
     回答終了時刻: log.finishedAt || "",
-    LSL同期: LSL.enabled ? (LSL.connected ? "あり" : "あり（接続断あり）") : "なし",
-    LSL開始時刻: lslTimeOf(log.startMarker),
-    LSL終了時刻: lslTimeOf(log.finishMarker),
     ヒント要請回数: log.hints.length,
     理解度テスト正解数: log.quiz.filter(q => q.正誤 === "正解").length,
     理解度テスト出題数: log.quiz.length
@@ -1155,11 +1087,8 @@ function header(){
 
 function downloadJSON(){
   const payload = Object.assign(header(), {
-    ヒント要請: log.hints.map(h => Object.assign({}, h, {
-      LSL時刻: lslTimeOf(h.LSLマーカー通番)
-    })),
+    ヒント要請: log.hints,
     理解度テスト: log.quiz,
-    LSLマーカー: LSL.markers,
     回答: buildFieldIndex()
       .filter(f => f.stepId !== "meta")
       .map(f => ({
@@ -1173,9 +1102,9 @@ function downloadJSON(){
 function downloadCSV(){
   const h = header();
   const meta = [h.モード, h.アルゴリズム, h.被験者ID, h.実施日, h.開始時刻, h.回答終了時刻,
-                h.LSL開始時刻, h.ヒント要請回数, `${h.理解度テスト正解数}/${h.理解度テスト出題数}`];
-  const rows = [["モード","アルゴリズム","被験者ID","実施日","開始時刻","回答終了時刻","LSL開始時刻",
-                 "ヒント要請回数","理解度テスト正解数","設問","区分","項目","空欄","回答"]];
+                h.ヒント要請回数, `${h.理解度テスト正解数}/${h.理解度テスト出題数}`];
+  const rows = [["モード","アルゴリズム","被験者ID","実施日","開始時刻","回答終了時刻","ヒント要請回数",
+                 "理解度テスト正解数","設問","区分","項目","空欄","回答"]];
 
   buildFieldIndex()
     .filter(f => f.stepId !== "meta")
@@ -1185,20 +1114,13 @@ function downloadCSV(){
 
   // ヒント要請は表の末尾に追記する（検証用ではこの行は出ない）
   log.hints.forEach(x => {
-    const lsl = lslTimeOf(x.LSLマーカー通番);
-    rows.push(meta.concat(["ヒント要請", x.設問, `通番${x.通番}`,
-                           lsl === "" ? "" : `LSL ${lsl}`, x.時刻]));
+    rows.push(meta.concat(["ヒント要請", x.設問, `通番${x.通番}`, "", x.時刻]));
   });
 
   // 理解度テストも末尾に追記する
   log.quiz.forEach(x => {
     rows.push(meta.concat(["理解度テスト", x.直前の設問, `${x.問題ID}｜${x.問題}`, x.正誤,
       `${x.選択番号}. ${x.選択した選択肢}（正解 ${x.正解番号}）／回答 ${x.回答時刻}`]));
-  });
-
-  // 送った LSL マーカーも末尾に追記する（XDF との突き合わせ用）
-  LSL.markers.forEach(m => {
-    rows.push(meta.concat(["LSLマーカー", m.イベント, `通番${m.通番}`, m.lsl時刻, m.時刻]));
   });
 
   download(baseName() + ".csv", "text/csv", csv(rows));
@@ -1216,14 +1138,6 @@ document.getElementById("hint-btn").addEventListener("click", requestHint);
 document.getElementById("next").addEventListener("click", () => {
   if (current >= STEPS.length - 1) return;
 
-  // 同期して実施するときは、マーカーが記録されない状態で始めさせない
-  if (LSL.enabled && !LSL.connected && STEPS[current].kind === "intro"){
-    alert("マーカーの送信先に接続できていません。\n\n"
-        + "lsl_bridge/bridge.py を起動してから開始してください。\n"
-        + "同期せずに実施する場合は、URL に &lsl=0 を付けて開き直してください。");
-    return;
-  }
-
   // すべて埋まるまで次へ進めない（「はじめに」の被験者IDも対象）
   const missing = findMissing();
   if (missing.length){
@@ -1233,12 +1147,8 @@ document.getElementById("next").addEventListener("click", () => {
     return;
   }
 
-  // 理解度テストの表示より先に設問の終了を記録する。
-  // 順序を逆にすると、設問の区間にテストの時間が混ざってしまう
-  const step = STEPS[current];
-  if (step.id) LSL.mark("step_leave", { step: step.id });
-
   // 設問を終えた直後に理解度テストがあれば、先にそれを出す
+  const step = STEPS[current];
   if (step.id && hasQuiz(step.id)){
     openQuiz(step.id);
     return;
@@ -1249,24 +1159,12 @@ document.getElementById("next").addEventListener("click", () => {
 
 // 次のステップへ進む（理解度テストの回答後もここに戻ってくる）
 function advance(){
-  const from = STEPS[current];
-
   // 「開始する」を押した時刻を記録する
   // 途中で再読み込みされても最初の時刻を保つため、すでにあれば上書きしない
-  if (from.kind === "intro"){
-    if (!log.startedAt) log.startedAt = nowStamp();
-    // ここが t = 0。ソースコードの表示と同時
-    const m = LSL.mark("start");
-    if (m) log.startMarker = m.通番;
-  }
-  // step_leave は理解度テストより前に送るため、呼び出し側で記録している
+  if (STEPS[current].kind === "intro" && !log.startedAt) log.startedAt = nowStamp();
 
   current++;
-  if (STEPS[current].kind === "done"){
-    log.finishedAt = nowStamp();
-    const m = LSL.mark("finish");
-    if (m) log.finishMarker = m.通番;
-  }
+  if (STEPS[current].kind === "done") log.finishedAt = nowStamp();
 
   save();
   render();

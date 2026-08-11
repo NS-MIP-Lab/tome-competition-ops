@@ -1,2 +1,0 @@
-pylsl>=1.17,<2
-websockets>=12
