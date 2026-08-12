@@ -81,7 +81,10 @@
     flex:0 0 auto;padding:12px 24px;border-top:1px solid var(--border);
     background:#fbfbfc;display:flex;justify-content:space-between;align-items:center;gap:12px;
   }
-  #save-state{font-size:12px;color:var(--muted);}
+  #save-state{
+    font-size:12px;color:var(--muted);
+    min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
 
   h2.q-title{font-size:19px;margin:0 0 6px;font-weight:700;color:var(--head);}
   h3.q-sub{font-size:15px;margin:20px 0 8px;font-weight:700;color:var(--head);}
@@ -130,8 +133,10 @@
   .choices label:has(input:checked){border-color:var(--accent);background:#eaf1f8;}
 
   .btn{
-    font-family:inherit;font-size:15px;font-weight:600;padding:9px 26px;border-radius:6px;
+    font-family:inherit;font-size:15px;font-weight:600;padding:9px 20px;border-radius:6px;
     border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;
+    white-space:nowrap;          /* 幅が足りなくても文字を折り返さない */
+    flex:0 0 auto;               /* ボタンは縮めない */
   }
   .btn:hover{background:var(--accent-dark);border-color:var(--accent-dark);}
   .btn.ghost{background:#fff;color:var(--accent);}
@@ -139,27 +144,30 @@
   .btn.hint{background:var(--hint);border-color:var(--hint);}
   .btn.hint:hover{background:#a91f1f;border-color:#a91f1f;}
 
-  /* ===== ヒント要請の合図（数秒だけ大きく表示して消える） ===== */
+  /* ===== ヒント要請の合図（数秒だけ表示して消える） =====
+     実験員が視界の端で気づける程度に抑えている。
+     被験者の目の前で強く光らせると、まさに計測したい瞬間に
+     視覚刺激が入り、脳波や心拍に余計な反応が乗ってしまう */
   #hint-flash{
     position:fixed;inset:0;z-index:9999;
     display:none;align-items:center;justify-content:center;
     pointer-events:none;                    /* 表示中も入力を妨げない */
-    opacity:0;transition:opacity .25s ease;
-    background:rgba(198,40,40,.30);
-    animation:hint-pulse 1s ease-in-out infinite;
+    opacity:0;transition:opacity .3s ease;
+    background:rgba(198,40,40,.12);
+    animation:hint-pulse 1.8s ease-in-out infinite;
   }
   #hint-flash.on{opacity:1;}
   @keyframes hint-pulse{
-    0%,100%{background:rgba(198,40,40,.18);}
-    50%    {background:rgba(198,40,40,.44);}
+    0%,100%{background:rgba(198,40,40,.08);}
+    50%    {background:rgba(198,40,40,.18);}
   }
   .hint-flash-inner{
-    background:var(--hint);color:#fff;border-radius:16px;
-    padding:36px 60px;text-align:center;
-    font-size:38px;font-weight:700;line-height:1.4;
-    box-shadow:0 10px 40px rgba(0,0,0,.35);
+    background:var(--hint);color:#fff;border-radius:10px;
+    padding:18px 32px;text-align:center;
+    font-size:22px;font-weight:700;line-height:1.5;
+    box-shadow:0 6px 20px rgba(0,0,0,.22);
   }
-  .hint-flash-inner span{display:block;margin-top:10px;font-size:18px;font-weight:600;opacity:.9;}
+  .hint-flash-inner span{display:block;margin-top:6px;font-size:13px;font-weight:600;opacity:.9;}
 
   /* ===== 前回データの警告（被験者の取り違え防止） ===== */
   .warn{
@@ -230,13 +238,16 @@
     border-radius:8px;padding:10px 14px;margin:0 0 18px;font-size:14px;font-weight:600;
   }
 
-  .foot-left{display:flex;align-items:center;gap:14px;}
-  .foot-right{display:flex;align-items:center;gap:10px;}
+  /* フッターは、余りがあれば左の説明文に割り当て、足りなければ説明文を削る。
+     ボタンは常に元の大きさを保つ */
+  .foot-left{display:flex;align-items:center;gap:14px;flex:1 1 auto;min-width:0;}
+  .foot-right{display:flex;align-items:center;gap:10px;flex:0 0 auto;}
   .linkbtn{
     font-family:inherit;font-size:12px;color:var(--accent);
     background:none;border:none;padding:0;text-decoration:underline;cursor:pointer;white-space:nowrap;
   }
-  .done-actions{display:flex;gap:10px;justify-content:center;margin-top:24px;}
+  /* 完了画面のボタンは、収まらなければ折り返して縦に積む */
+  .done-actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:24px;}
 
   .meta-grid{display:grid;grid-template-columns:auto 1fr;gap:10px 14px;align-items:center;margin-bottom:20px;}
   .meta-grid label{font-size:14px;font-weight:600;}
@@ -280,7 +291,7 @@
     <div id="right-body"></div>
     <div id="right-foot">
       <div class="foot-left">
-        <span id="save-state">入力内容はこのブラウザに自動保存されます</span>
+        <span id="save-state">入力は自動保存されます</span>
         <button type="button" class="linkbtn" id="export-btn">ファイルに書き出す</button>
       </div>
       <div class="foot-right">
@@ -470,7 +481,7 @@ function save(){
   s.textContent = "保存しました";
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    s.textContent = "入力内容はこのブラウザに自動保存されます";
+    s.textContent = "入力は自動保存されます";
   }, 1500);
 }
 
@@ -557,7 +568,8 @@ function render(){
       'この画面のまま実施者にお知らせください。</p>' +
       '<div class="done-actions">' +
       '<button class="btn" id="dl-json">JSONを保存</button>' +
-      '<button class="btn ghost" id="dl-csv">CSVを保存</button>' +
+      '<button class="btn ghost" id="dl-answers">回答CSVを保存</button>' +
+      '<button class="btn ghost" id="dl-events">イベントCSVを保存</button>' +
       '</div>' +
       '<p style="margin-top:34px;font-size:13px;">― 実験員の方へ ―<br>' +
       'ファイルが保存されたことを確認してから、次の被験者へ進んでください。</p>' +
@@ -565,7 +577,8 @@ function render(){
       '<button class="btn hint" id="next-subject">データを消去して次の被験者へ</button>' +
       '</div></div>';
     document.getElementById("dl-json").addEventListener("click", downloadJSON);
-    document.getElementById("dl-csv").addEventListener("click", downloadCSV);
+    document.getElementById("dl-answers").addEventListener("click", downloadAnswersCSV);
+    document.getElementById("dl-events").addEventListener("click", downloadEventsCSV);
     document.getElementById("next-subject").addEventListener("click", () => {
       if (confirm("この被験者の入力内容を消去して、問題と条件を選ぶ画面に戻ります。\n\n書き出したファイルを保存済みか確認してください。\n続けますか？")) resetAndGoTop();
     });
@@ -1235,6 +1248,7 @@ function 設問別合計(){
 // 経過ミリ秒（解析用。開始を 0 とする）の3種類を記録する
 function header(){
   return {
+    問題ID: PROBLEM_ID,
     モード: MODE_LABEL,
     アルゴリズム: ALGORITHM_NAME,
     被験者ID: answers["meta.subjectId"] || "",
@@ -1266,49 +1280,80 @@ function downloadJSON(){
   download(baseName() + ".json", "application/json", JSON.stringify(payload, null, 2));
 }
 
-function downloadCSV(){
+// どのファイルにも入れる結合キー。問題ID・条件・被験者ID で3ファイルを突き合わせる
+function keyColumns(){
   const h = header();
-  const meta = [h.モード, h.アルゴリズム, h.被験者ID, h.実施日, h.開始時刻, h.開始Unix時刻,
-                h.回答終了時刻, h.所要ミリ秒,
-                h.ヒント要請回数, `${h.理解度テスト正解数}/${h.理解度テスト出題数}`];
-  const rows = [["モード","アルゴリズム","被験者ID","実施日","開始時刻","開始Unix時刻",
-                 "回答終了時刻","所要ミリ秒","ヒント要請回数",
-                 "理解度テスト正解数","設問","区分","項目","経過ミリ秒","回答"]];
+  return {
+    header: ["問題ID","アルゴリズム","条件","被験者ID","実施日"],
+    values: [h.問題ID, h.アルゴリズム, h.モード, h.被験者ID, h.実施日]
+  };
+}
+
+/* 回答（採点用）。1行1項目。時刻はイベント側と JSON にあるので載せない */
+function downloadAnswersCSV(){
+  const k = keyColumns();
+  const rows = [k.header.concat(["設問","区分","項目","空欄","回答"])];
 
   buildFieldIndex()
     .filter(f => f.stepId !== "meta")
     .forEach(f => {
-      rows.push(meta.concat([f.stepId, f.section, f.item, f.blankNo, answers[f.key] || ""]));
+      rows.push(k.values.concat([f.stepId, f.section, f.item, f.blankNo, answers[f.key] || ""]));
     });
 
-  // 設問ごとの滞在を表の末尾に追記する
+  download(baseName() + "_answers.csv", "text/csv", csv(rows));
+}
+
+/* イベント（機械学習用）。1行1イベント。種別で行を選べばそのまま解析に使える */
+function downloadEventsCSV(){
+  const k = keyColumns();
+  const h = header();
+  const rows = [k.header.concat([
+    "種別","対象","連番",
+    "開始時刻","開始Unix時刻","開始経過ミリ秒",
+    "終了時刻","終了Unix時刻","終了経過ミリ秒",
+    "所要ミリ秒","補足"
+  ])];
+  const add = (...cols) => rows.push(k.values.concat(cols));
+
+  // 課題全体
+  add("セッション", "課題全体", "",
+      h.開始時刻, h.開始Unix時刻, 0,
+      h.回答終了時刻, h.回答終了Unix時刻, h.所要ミリ秒,
+      h.所要ミリ秒, "");
+
+  // 設問ごとの滞在。「前に戻る」で複数回入れるため訪問ごとに1行
   log.steps.forEach(v => {
-    rows.push(meta.concat(["設問滞在", v.設問, `${v.訪問}回目`,
-      v.滞在ミリ秒 == null ? "" : v.滞在ミリ秒,
-      `開始 ${v.開始時刻}／終了 ${v.終了時刻 || (v.中断 ? "中断" : "未終了")}`]));
+    add("設問滞在", v.設問, v.訪問,
+        v.開始時刻, v.開始Unix時刻, v.開始経過ミリ秒,
+        v.終了時刻 || "", v.終了Unix時刻 || "", v.終了経過ミリ秒 == null ? "" : v.終了経過ミリ秒,
+        v.滞在ミリ秒 == null ? "" : v.滞在ミリ秒,
+        v.中断 ? "中断" : "");
   });
 
-  // ヒント要請は表の末尾に追記する（検証用ではこの行は出ない）
+  // ヒント要請（学習用のみ）。押した瞬間の1点なので開始と終了が同じ
   log.hints.forEach(x => {
-    rows.push(meta.concat(["ヒント要請", x.設問, `通番${x.通番}`,
-      x.経過ミリ秒 == null ? "" : x.経過ミリ秒, x.時刻]));
+    add("ヒント要請", x.設問, x.通番,
+        x.時刻, x.Unix時刻, x.経過ミリ秒 == null ? "" : x.経過ミリ秒,
+        x.時刻, x.Unix時刻, x.経過ミリ秒 == null ? "" : x.経過ミリ秒,
+        "", "");
   });
 
-  // 理解度テストも末尾に追記する
+  // 理解度テスト。所要は反応時間
   log.quiz.forEach(x => {
-    rows.push(meta.concat(["理解度テスト", x.直前の設問,
-      `問${x.出題順}｜${x.問題ID}｜${x.問題}`,
-      x.反応時間ミリ秒 == null ? "" : x.反応時間ミリ秒,
-      `${x.選択番号}. ${x.選択した選択肢}（正解 ${x.正解番号}）／${x.正誤}`
-      + `／開始 ${x.開始時刻}／終了 ${x.終了時刻}`]));
+    add("理解度テスト", x.直前の設問, x.出題順,
+        x.開始時刻, x.開始Unix時刻, x.開始経過ミリ秒,
+        x.終了時刻, x.終了Unix時刻, x.終了経過ミリ秒,
+        x.反応時間ミリ秒 == null ? "" : x.反応時間ミリ秒,
+        `${x.問題ID}／選択${x.選択番号}／正解${x.正解番号}／${x.正誤}`);
   });
 
-  download(baseName() + ".csv", "text/csv", csv(rows));
+  download(baseName() + "_events.csv", "text/csv", csv(rows));
 }
 
 function exportAll(){
   downloadJSON();
-  setTimeout(downloadCSV, 500);
+  setTimeout(downloadAnswersCSV, 500);
+  setTimeout(downloadEventsCSV, 1000);
 }
 
 document.getElementById("export-btn").addEventListener("click", exportAll);
