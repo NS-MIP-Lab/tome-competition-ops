@@ -175,6 +175,7 @@
     border:1.5px solid var(--hint);background:#fdecec;color:#8e1c1c;
     border-radius:8px;padding:10px 14px;margin:0 0 16px;font-size:14px;font-weight:600;
   }
+  #validation-msg .msg-sub{display:block;margin-top:6px;font-weight:400;}
   .missing-tag{
     display:inline-block;margin-left:8px;padding:1px 9px;border-radius:99px;
     background:var(--hint);color:#fff;font-size:11px;font-weight:700;
@@ -190,16 +191,18 @@
   .meta-grid input.missing{background:#fff5f5;border-color:var(--hint);}
   .choices.missing{outline:2px solid var(--hint);outline-offset:3px;border-radius:6px;}
 
-  /* ===== 理解度テスト ===== */
+  /* ===== 理解度テスト =====
+     右半分だけを覆う。左のソースコードは見たまま答えられ、
+     自分が書いた設計書は完全に隠れる（不透明にしている） */
   #quiz-overlay{
-    position:fixed;inset:0;z-index:9998;padding:24px;
+    position:fixed;inset:0 0 0 50%;z-index:9998;padding:18px;
     display:none;align-items:center;justify-content:center;
-    background:rgba(20,26,34,.72);
+    background:#141a22;
   }
   #quiz-overlay.on{display:flex;}
   .quiz-card{
     background:var(--panel);border-radius:14px;width:100%;max-width:780px;
-    max-height:88vh;overflow-y:auto;padding:32px 36px 26px;
+    max-height:calc(100vh - 36px);overflow-y:auto;padding:28px 30px 24px;
     box-shadow:0 20px 60px rgba(0,0,0,.45);
   }
   .quiz-card h2{margin:0 0 4px;font-size:21px;color:var(--head);}
@@ -644,6 +647,16 @@ function refreshMissingMsg(count){
   const btn = document.getElementById("next").textContent;   // 「次へ進む」「開始する」など
   msg.textContent =
     `未入力の欄が ${left} か所あります。「未入力」と示した欄をすべて埋めてから「${btn}」を押してください。`;
+
+  // 設問では、どうしても分からないときの進み方を案内する
+  // （「はじめに」画面の被験者IDには当てはまらないので出さない）
+  const step = STEPS[current];
+  if (step && step.id){
+    const sub = document.createElement("span");
+    sub.className = "msg-sub";
+    sub.textContent = "ヒントをもらっても分からない場合は、その欄に \\ を入れて進んでください。";
+    msg.appendChild(sub);
+  }
 }
 
 /* ===================================================================
@@ -709,6 +722,8 @@ function openQuiz(stepId){
   };
   document.getElementById("quiz-overlay").classList.add("on");
   document.getElementById("quiz-body").scrollTop = 0;
+  // 隠れている設計書へ Tab キーで入り込めないようにする
+  document.getElementById("right").inert = true;
 }
 
 // 「回答して次へ進む」：全問答えていなければ閉じない
@@ -757,6 +772,7 @@ function submitQuiz(){
 
   quizDone[quizContext.stepId] = true;
   document.getElementById("quiz-overlay").classList.remove("on");
+  document.getElementById("right").inert = false;
   const msg = document.getElementById("quiz-msg");
   if (msg) msg.remove();
   quizContext = null;
@@ -875,6 +891,7 @@ function renderIntro(){
     "各回答欄では、指定された1つの観点について記入してください。数値、条件式、変数名、または短い文で構いません。",
     "自由記述欄には文章の型を示しています。空欄部分をコードから判断できる内容で埋めてください。",
     "コードの書き写しだけでなく、値がどのように変わるか、処理後にどの状態になるかが分かるように記入してください。",
+    "すべての欄を埋めないと次の設問へ進めません。どうしても分からない欄には \\ を入れて進んでください。",
     "電卓、Web検索、生成AI、教科書、プログラムの実行環境などは使用しないでください。"
   ].forEach(t => {
     const li = document.createElement("li");
