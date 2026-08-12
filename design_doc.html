@@ -207,6 +207,10 @@
   }
   .quiz-card h2{margin:0 0 4px;font-size:21px;color:var(--head);}
   .quiz-lead{margin:0 0 22px;font-size:14px;color:var(--muted);}
+  #quiz-count{
+    display:inline-block;margin-left:8px;padding:1px 10px;border-radius:99px;
+    background:#eef1f5;color:var(--head);font-size:12px;font-weight:700;white-space:nowrap;
+  }
   .quiz-item{margin-bottom:24px;}
   .quiz-q{margin:0 0 10px;font-size:15px;font-weight:700;}
   .quiz-q .no{color:var(--head);margin-right:8px;}
@@ -280,6 +284,7 @@
         <button type="button" class="linkbtn" id="export-btn">ファイルに書き出す</button>
       </div>
       <div class="foot-right">
+        <button type="button" class="btn ghost" id="prev">前に戻る</button>
         <button type="button" class="btn hint" id="hint-btn">ヒント</button>
         <button class="btn" id="next">次へ進む</button>
       </div>
@@ -292,11 +297,14 @@
   <div class="hint-flash-inner">ヒントを要請しました<span>実験員をお呼びしています</span></div>
 </div>
 
-<!-- 理解度テスト（画面全体をふさぐ） -->
+<!-- 理解度テスト（右半分をふさぎ、1問ずつ表示する） -->
 <div id="quiz-overlay">
   <div class="quiz-card">
     <h2 id="quiz-title">理解度確認</h2>
-    <p class="quiz-lead">次の設問に進む前に、以下の問題に答えてください。</p>
+    <p class="quiz-lead">
+      次の設問に進む前に、以下の問題に答えてください。
+      <span id="quiz-count"></span>
+    </p>
     <div id="quiz-body"></div>
     <div class="quiz-actions">
       <button class="btn" id="quiz-submit">回答して次へ進む</button>
@@ -524,6 +532,7 @@ function render(){
     setBar(0);
     setCodeVisible(false);
     setHintVisible(false);
+    setPrevVisible(false);
     body.appendChild(renderIntro());
     document.getElementById("next").textContent = "開始する";
     foot.style.display = "flex";
@@ -534,6 +543,7 @@ function render(){
     counter.textContent = "完了";
     setBar(1);
     setHintVisible(false);
+    setPrevVisible(false);
     body.innerHTML =
       '<div class="done"><h2>お疲れさまでした</h2>' +
       '<p>すべての設問が終了しました。<br>回答ファイルの保存が始まります。<br>' +
@@ -562,6 +572,7 @@ function render(){
   setBar(index / QUESTION_COUNT);
   setCodeVisible(true);
   setHintVisible(true);
+  setPrevVisible(true);
 
   const h = document.createElement("h2");
   h.className = "q-title";
@@ -677,104 +688,128 @@ function hasQuiz(stepId){
   return Array.isArray(QUIZ[stepId]) && QUIZ[stepId].length > 0 && !quizDone[stepId];
 }
 
+// 理解度テストを開く。1問ずつ表示し、問ごとに開始と終了の時刻を記録する
 function openQuiz(stepId){
-  const items = QUIZ[stepId];
-  const body = document.getElementById("quiz-body");
-  body.innerHTML = "";
-
-  items.forEach((item, i) => {
-    const wrap = document.createElement("div");
-    wrap.className = "quiz-item";
-    wrap.dataset.index = i;
-
-    const q = document.createElement("p");
-    q.className = "quiz-q";
-    q.innerHTML = `<span class="no">問${i + 1}</span>`;
-    q.appendChild(document.createTextNode(item.question || ""));
-    wrap.appendChild(q);
-
-    const box = document.createElement("div");
-    box.className = "quiz-choices";
-    (item.choices || []).forEach((choice, ci) => {
-      const label = document.createElement("label");
-      const input = document.createElement("input");
-      input.type = "radio";
-      input.name = `quiz.${stepId}.${item.id || i}`;
-      input.value = String(ci);
-      input.addEventListener("change", () => {
-        wrap.classList.remove("missing");
-        const msg = document.getElementById("quiz-msg");
-        if (msg && !document.querySelectorAll(".quiz-item.missing").length) msg.remove();
-      });
-      label.appendChild(input);
-      label.appendChild(document.createTextNode(`${ci + 1}. ${choice}`));
-      box.appendChild(label);
-    });
-    wrap.appendChild(box);
-    body.appendChild(wrap);
-  });
-
-  quizContext = {
-    stepId,
-    shownAt: nowStamp(),
-    shownUnix: nowUnix(),
-    shownElapsed: elapsedMs()
-  };
+  quizContext = { stepId, index: 0 };
   document.getElementById("quiz-overlay").classList.add("on");
-  document.getElementById("quiz-body").scrollTop = 0;
   // 隠れている設計書へ Tab キーで入り込めないようにする
   document.getElementById("right").inert = true;
+  renderQuizItem();
+}
+
+// いま表示すべき1問を描画し、その表示時刻を開始時刻として押さえる
+function renderQuizItem(){
+  const items = QUIZ[quizContext.stepId];
+  const i     = quizContext.index;
+  const item  = items[i];
+  const body  = document.getElementById("quiz-body");
+
+  body.innerHTML = "";
+
+  const wrap = document.createElement("div");
+  wrap.className = "quiz-item";
+
+  const q = document.createElement("p");
+  q.className = "quiz-q";
+  q.innerHTML = `<span class="no">問${i + 1}</span>`;
+  q.appendChild(document.createTextNode(item.question || ""));
+  wrap.appendChild(q);
+
+  const box = document.createElement("div");
+  box.className = "quiz-choices";
+  (item.choices || []).forEach((choice, ci) => {
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = `quiz.${quizContext.stepId}.${item.id || i}`;
+    input.value = String(ci);
+    input.addEventListener("change", () => {
+      wrap.classList.remove("missing");
+      const msg = document.getElementById("quiz-msg");
+      if (msg) msg.remove();
+    });
+    label.appendChild(input);
+    label.appendChild(document.createTextNode(`${ci + 1}. ${choice}`));
+    box.appendChild(label);
+  });
+  wrap.appendChild(box);
+  body.appendChild(wrap);
+
+  // この問の開始時刻。表示した瞬間を指す
+  quizContext.shownAt      = nowStamp();
+  quizContext.shownUnix    = nowUnix();
+  quizContext.shownElapsed = elapsedMs();
+
+  document.getElementById("quiz-count").textContent = `${i + 1} / ${items.length} 問`;
+  document.getElementById("quiz-submit").textContent =
+    (i === items.length - 1) ? "回答して次へ進む" : "次の問題へ";
+  body.scrollTop = 0;
 }
 
 // 「回答して次へ進む」：全問答えていなければ閉じない
+// 表示中の1問を確定する。全問終わったら閉じて次の設問へ進む
 function submitQuiz(){
   const items = QUIZ[quizContext.stepId];
-  const wraps = [...document.querySelectorAll("#quiz-body .quiz-item")];
-  const unanswered = wraps.filter(w => !w.querySelector("input:checked"));
+  const i     = quizContext.index;
+  const item  = items[i];
+  const wrap  = document.querySelector("#quiz-body .quiz-item");
+  const chosen = wrap.querySelector("input:checked");
 
-  if (unanswered.length){
-    unanswered.forEach(w => w.classList.add("missing"));
+  if (!chosen){
+    wrap.classList.add("missing");
     let msg = document.getElementById("quiz-msg");
     if (!msg){
       msg = document.createElement("div");
       msg.id = "quiz-msg";
       document.getElementById("quiz-body").insertAdjacentElement("beforebegin", msg);
     }
-    msg.textContent = `未回答が ${unanswered.length} 問あります。すべて選んでから押してください。`;
-    unanswered[0].scrollIntoView({ behavior:"smooth", block:"center" });
+    msg.textContent = "選択肢をひとつ選んでから押してください。";
     return;
   }
 
+  // この問の終了時刻。開始との差がその問の反応時間になる
   const answeredAt      = nowStamp();
   const answeredUnix    = nowUnix();
   const answeredElapsed = elapsedMs();
-  wraps.forEach((w, i) => {
-    const item = items[i];
-    const picked = Number(w.querySelector("input:checked").value);
-    const correct = (item.answer === null || item.answer === undefined)
-      ? "" : (picked === item.answer ? "正解" : "不正解");
-    log.quiz.push({
-      直前の設問: quizContext.stepId,
-      問題ID: item.id || `${quizContext.stepId}-${i + 1}`,
-      問題: item.question || "",
-      選択番号: picked + 1,
-      選択した選択肢: (item.choices || [])[picked] || "",
-      正解番号: (item.answer === null || item.answer === undefined) ? "" : item.answer + 1,
-      正誤: correct,
-      表示時刻: quizContext.shownAt,
-      表示Unix時刻: quizContext.shownUnix,
-      表示経過ミリ秒: quizContext.shownElapsed,
-      回答時刻: answeredAt,
-      回答Unix時刻: answeredUnix,
-      回答経過ミリ秒: answeredElapsed
-    });
+
+  const picked  = Number(chosen.value);
+  const correct = (item.answer === null || item.answer === undefined)
+    ? "" : (picked === item.answer ? "正解" : "不正解");
+
+  log.quiz.push({
+    直前の設問: quizContext.stepId,
+    出題順: i + 1,
+    問題ID: item.id || `${quizContext.stepId}-${i + 1}`,
+    問題: item.question || "",
+    選択番号: picked + 1,
+    選択した選択肢: (item.choices || [])[picked] || "",
+    正解番号: (item.answer === null || item.answer === undefined) ? "" : item.answer + 1,
+    正誤: correct,
+    開始時刻: quizContext.shownAt,
+    開始Unix時刻: quizContext.shownUnix,
+    開始経過ミリ秒: quizContext.shownElapsed,
+    終了時刻: answeredAt,
+    終了Unix時刻: answeredUnix,
+    終了経過ミリ秒: answeredElapsed,
+    反応時間ミリ秒: (quizContext.shownElapsed == null || answeredElapsed == null)
+      ? answeredUnix - quizContext.shownUnix
+      : answeredElapsed - quizContext.shownElapsed
   });
+
+  const msg = document.getElementById("quiz-msg");
+  if (msg) msg.remove();
+
+  // まだ問題が残っていれば次の1問へ。前の問題には戻らない
+  if (i + 1 < items.length){
+    quizContext.index = i + 1;
+    save();
+    renderQuizItem();
+    return;
+  }
 
   quizDone[quizContext.stepId] = true;
   document.getElementById("quiz-overlay").classList.remove("on");
   document.getElementById("right").inert = false;
-  const msg = document.getElementById("quiz-msg");
-  if (msg) msg.remove();
   quizContext = null;
   save();
   advance();
@@ -810,6 +845,14 @@ function showHintFlash(){
 function setHintVisible(visible){
   document.getElementById("hint-btn").style.display =
     (MODE === "learning" && visible) ? "" : "none";
+}
+
+// 2問目以降でだけ「前に戻る」を出す。
+// 「はじめに」画面へは戻さない。開始ボタンを押し直せると経過時間の起点が
+// 揺らぐうえ、開始前の状態に戻す意味がないため
+function setPrevVisible(visible){
+  document.getElementById("prev").style.display =
+    (visible && current >= 2) ? "" : "none";
 }
 
 /* 開始前はソースコードを隠し、「開始する」を押してから表示する */
@@ -1190,9 +1233,11 @@ function downloadCSV(){
 
   // 理解度テストも末尾に追記する
   log.quiz.forEach(x => {
-    rows.push(meta.concat(["理解度テスト", x.直前の設問, `${x.問題ID}｜${x.問題}`,
-      x.回答経過ミリ秒 == null ? "" : x.回答経過ミリ秒,
-      `${x.選択番号}. ${x.選択した選択肢}（正解 ${x.正解番号}）／${x.正誤}／回答 ${x.回答時刻}`]));
+    rows.push(meta.concat(["理解度テスト", x.直前の設問,
+      `問${x.出題順}｜${x.問題ID}｜${x.問題}`,
+      x.反応時間ミリ秒 == null ? "" : x.反応時間ミリ秒,
+      `${x.選択番号}. ${x.選択した選択肢}（正解 ${x.正解番号}）／${x.正誤}`
+      + `／開始 ${x.開始時刻}／終了 ${x.終了時刻}`]));
   });
 
   download(baseName() + ".csv", "text/csv", csv(rows));
@@ -1253,6 +1298,14 @@ function advance(){
 }
 
 document.getElementById("quiz-submit").addEventListener("click", submitQuiz);
+
+// 前の設問へ戻る。未入力チェックはかけない（進むのではなく離れる操作なので）
+document.getElementById("prev").addEventListener("click", () => {
+  if (current < 2) return;              // 「はじめに」までは戻さない
+  current--;
+  save();
+  render();
+});
 
 window.addEventListener("resize", fitCode);
 
