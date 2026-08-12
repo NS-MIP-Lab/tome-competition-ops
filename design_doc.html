@@ -320,25 +320,27 @@
      問題を追加するときは、ここに2行足してください。
      =================================================================== -->
 <script src="data/catalog.js"></script>
-<script src="data/p5_problem.js"></script>
-<script src="data/p5_quiz.js"></script>
-<script src="data/p3_problem.js"></script>
-<script src="data/p3_quiz.js"></script>
-<script src="data/p6_problem.js"></script>
-<script src="data/p6_quiz.js"></script>
+<script src="data/pA_problem.js"></script>
+<script src="data/pA_quiz.js"></script>
+<script src="data/pB_problem.js"></script>
+<script src="data/pB_quiz.js"></script>
+<script src="data/pC_problem.js"></script>
+<script src="data/pC_quiz.js"></script>
+<script src="data/pD_problem.js"></script>
+<script src="data/pD_quiz.js"></script>
 
 <script>
 /* ===================================================================
    実施する問題とモード
-     design_doc.html?problem=p5&mode=learning
-       problem … data/catalog.js に登録した問題ID。省略時は p5
+     design_doc.html?problem=pA&mode=learning
+       problem … data/catalog.js に登録した問題ID。省略時は pA
        mode    … learning＝学習用（ヒントあり）／test＝検証用
                  指定なし・不正値は検証用として扱う
    =================================================================== */
 const params  = new URLSearchParams(location.search);
 const MODE    = params.get("mode") === "learning" ? "learning" : "test";
 const MODE_LABEL = MODE === "learning" ? "学習用" : "検証用";
-const PROBLEM_ID = params.get("problem") || "p5";
+const PROBLEM_ID = params.get("problem") || "pA";
 
 // 問題データを取り出す。読み込めていなければ null（後段でエラー画面を出す）
 const PROBLEM = (typeof PROBLEMS !== "undefined" && PROBLEMS) ? PROBLEMS[PROBLEM_ID] : null;
@@ -452,6 +454,11 @@ if (!store.log) store.log = { startedAt:null, finishedAt:null, hints:[] };
 if (!store.log.hints) store.log.hints = [];      // 旧データからの移行
 if (!store.log.quiz)  store.log.quiz  = [];      // 理解度テストの回答
 if (!store.log.quizDone) store.log.quizDone = {}; // 出題済みの設問
+if (!store.log.steps) store.log.steps = [];      // 設問ごとの滞在（訪問ごとに1件）
+
+// 前回が途中で閉じられていた場合、開いたままの滞在記録に印をつける
+const dangling = store.log.steps[store.log.steps.length - 1];
+if (dangling && dangling.終了Unix時刻 === null) dangling.中断 = true;
 
 const answers = store.answers;
 const log = store.log;
@@ -573,6 +580,7 @@ function render(){
   setCodeVisible(true);
   setHintVisible(true);
   setPrevVisible(true);
+  openVisit(step.id);
 
   const h = document.createElement("h2");
   h.className = "q-title";
@@ -595,6 +603,40 @@ function render(){
 
 function setBar(ratio){
   document.querySelector("#bar > div").style.width = (ratio * 100) + "%";
+}
+
+/* ===================================================================
+   設問ごとの滞在記録
+
+   「前に戻る」で同じ設問へ何度も入れるため、訪問ごとに1件を積む。
+   合計滞在時間は、同じ設問の記録を足せば求められる。
+
+   終了は「次へ進む」を押した時点で記録する。理解度テストを表示する前に
+   閉じるので、設問の滞在時間に4択の回答時間は混ざらない。
+   =================================================================== */
+function openVisit(stepId){
+  log.steps.push({
+    設問: stepId,
+    訪問: log.steps.filter(v => v.設問 === stepId).length + 1,
+    開始時刻: nowStamp(),
+    開始Unix時刻: nowUnix(),
+    開始経過ミリ秒: elapsedMs(),
+    終了時刻: null,
+    終了Unix時刻: null,
+    終了経過ミリ秒: null,
+    滞在ミリ秒: null
+  });
+}
+
+function closeVisit(){
+  const v = log.steps[log.steps.length - 1];
+  if (!v || v.終了Unix時刻 !== null) return;      // 開いている記録が無ければ何もしない
+  v.終了時刻     = nowStamp();
+  v.終了Unix時刻 = nowUnix();
+  v.終了経過ミリ秒 = elapsedMs();
+  v.滞在ミリ秒 = (v.開始経過ミリ秒 == null || v.終了経過ミリ秒 == null)
+    ? v.終了Unix時刻 - v.開始Unix時刻
+    : v.終了経過ミリ秒 - v.開始経過ミリ秒;
 }
 
 /* ===================================================================
@@ -1175,6 +1217,18 @@ function csv(rows){
   return "﻿" + rows.map(r => r.map(esc).join(",")).join("\r\n");
 }
 
+// 同じ設問への複数回の訪問をまとめる（解析でよく使う形にしておく）
+function 設問別合計(){
+  const order = [];
+  const sum = {};
+  log.steps.forEach(v => {
+    if (!(v.設問 in sum)){ order.push(v.設問); sum[v.設問] = { 訪問回数: 0, 合計滞在ミリ秒: 0 }; }
+    sum[v.設問].訪問回数++;
+    if (v.滞在ミリ秒 != null) sum[v.設問].合計滞在ミリ秒 += v.滞在ミリ秒;
+  });
+  return order.map(id => Object.assign({ 設問: id }, sum[id]));
+}
+
 // 書き出す情報：モード・アルゴリズム名・被験者ID・実施日・各時刻
 //               ヒント要請回数・最終的な回答
 // 時刻は ISO 文字列（確認用）・Unix ミリ秒（他の記録との突き合わせ用）・
@@ -1198,6 +1252,8 @@ function header(){
 
 function downloadJSON(){
   const payload = Object.assign(header(), {
+    設問滞在: log.steps,
+    設問別合計: 設問別合計(),
     ヒント要請: log.hints,
     理解度テスト: log.quiz,
     回答: buildFieldIndex()
@@ -1224,6 +1280,13 @@ function downloadCSV(){
     .forEach(f => {
       rows.push(meta.concat([f.stepId, f.section, f.item, f.blankNo, answers[f.key] || ""]));
     });
+
+  // 設問ごとの滞在を表の末尾に追記する
+  log.steps.forEach(v => {
+    rows.push(meta.concat(["設問滞在", v.設問, `${v.訪問}回目`,
+      v.滞在ミリ秒 == null ? "" : v.滞在ミリ秒,
+      `開始 ${v.開始時刻}／終了 ${v.終了時刻 || (v.中断 ? "中断" : "未終了")}`]));
+  });
 
   // ヒント要請は表の末尾に追記する（検証用ではこの行は出ない）
   log.hints.forEach(x => {
@@ -1264,8 +1327,12 @@ document.getElementById("next").addEventListener("click", () => {
     return;
   }
 
-  // 設問を終えた直後に理解度テストがあれば、先にそれを出す
+  // 理解度テストを出す前に設問の滞在を閉じる。
+  // 逆にすると、設問の滞在時間に4択の回答時間が混ざってしまう
   const step = STEPS[current];
+  if (step.id) closeVisit();
+
+  // 設問を終えた直後に理解度テストがあれば、先にそれを出す
   if (step.id && hasQuiz(step.id)){
     openQuiz(step.id);
     return;
@@ -1302,6 +1369,7 @@ document.getElementById("quiz-submit").addEventListener("click", submitQuiz);
 // 前の設問へ戻る。未入力チェックはかけない（進むのではなく離れる操作なので）
 document.getElementById("prev").addEventListener("click", () => {
   if (current < 2) return;              // 「はじめに」までは戻さない
+  closeVisit();
   current--;
   save();
   render();
