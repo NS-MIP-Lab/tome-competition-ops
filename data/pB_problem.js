@@ -58,6 +58,7 @@ int main(void)
             r = m - 1;
     }
 
+    
 
     printf("なし\n");
 }`,
