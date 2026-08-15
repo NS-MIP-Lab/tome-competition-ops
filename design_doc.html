@@ -915,8 +915,11 @@ function setHintVisible(visible){
 // 「はじめに」画面へは戻さない。開始ボタンを押し直せると経過時間の起点が
 // 揺らぐうえ、開始前の状態に戻す意味がないため
 function setPrevVisible(visible){
+  // 最後の設問（自己評価）では戻さない。直前の理解度テストに答えたあとで
+  // 設計書を書き直せてしまうと、そのときの理解度と回答が対応しなくなる
+  const isLast = STEPS[current + 1] && STEPS[current + 1].kind === "done";
   document.getElementById("prev").style.display =
-    (visible && current >= 2) ? "" : "none";
+    (visible && current >= 2 && !isLast) ? "" : "none";
 }
 
 /* 開始前はソースコードを隠し、「開始する」を押してから表示する */
@@ -1503,6 +1506,8 @@ document.getElementById("quiz-submit").addEventListener("click", submitQuiz);
 // 前の設問へ戻る。未入力チェックはかけない（進むのではなく離れる操作なので）
 document.getElementById("prev").addEventListener("click", () => {
   if (current < 2) return;              // 「はじめに」までは戻さない
+  // 最後の設問からは戻さない（ボタンは隠してあるが、念のため処理側でも止める）
+  if (STEPS[current + 1] && STEPS[current + 1].kind === "done") return;
   closeVisit();
   current--;
   save();
