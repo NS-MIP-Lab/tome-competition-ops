@@ -1,10 +1,11 @@
 import json
+import re
 import socket
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from pylsl import resolve_byprop
 
@@ -13,7 +14,7 @@ PORT = 8000
 
 LABRECORDER_HOST = "127.0.0.1"
 LABRECORDER_RCS_PORT = 22345
-OUTPUT_DIR = Path(__file__).resolve().parent / "recordings"
+RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
 
 lock = threading.Lock()
 recording = False
@@ -58,7 +59,14 @@ def get_missing_devices():
     return missing
 
 
-def start_recording():
+def safe_component(value, label):
+    value = value.strip()
+    if not value or not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+        raise ValueError(f"{label}は半角英数字・_・-だけで入力してください")
+    return value
+
+
+def start_recording(subject_id, problem_id):
     global recording, current_file
 
     if recording:
@@ -68,13 +76,17 @@ def start_recording():
             "missing_devices": get_missing_devices(),
         }
 
+    subject_id = safe_component(subject_id, "被験者ID")
+    problem_id = safe_component(problem_id, "問題ID")
     missing = get_missing_devices()
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    filename = datetime.now().strftime("%Y%m%d_%H%M%S") + ".xdf"
-    current_file = OUTPUT_DIR / filename
+    output_dir = RESULTS_DIR / problem_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{subject_id}_{timestamp}.xdf"
+    current_file = output_dir / filename
 
-    root = str(OUTPUT_DIR.resolve()) + "/"
+    root = str(output_dir.resolve()) + "/"
 
     send_labrecorder(
         f"filename {{root:{root}}} {{template:{filename}}}",
@@ -113,17 +125,32 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
     def do_GET(self):
-        action = urlparse(self.path).path.strip("/")
+        request = urlparse(self.path)
+        action = request.path.strip("/")
+        query = parse_qs(request.query)
 
         try:
             with lock:
                 if action == "start":
-                    result = start_recording()
+                    result = start_recording(
+                        query.get("subject_id", [""])[0],
+                        query.get("problem_id", [""])[0],
+                    )
                 elif action == "end":
                     result = end_recording()
                 else:

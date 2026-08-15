@@ -269,6 +269,12 @@
   .done{text-align:center;padding:60px 20px;}
   .done h2{font-size:22px;margin:0 0 12px;color:var(--head);}
   .done p{color:var(--muted);}
+  .recorder-box{border:1px solid var(--border);border-radius:8px;background:#f7f8fa;padding:12px 16px;margin-bottom:20px;}
+  .recorder-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  .recorder-status{font-size:13px;color:var(--muted);}
+  .recorder-status.ok{color:#176b3a;font-weight:600;}
+  .recorder-status.warn{color:#9a5b00;font-weight:600;}
+  .recorder-status.error{color:var(--hint);font-weight:600;}
 </style>
 </head>
 <body>
@@ -352,6 +358,7 @@ const params  = new URLSearchParams(location.search);
 const MODE    = params.get("mode") === "learning" ? "learning" : "test";
 const MODE_LABEL = MODE === "learning" ? "学習用" : "検証用";
 const PROBLEM_ID = params.get("problem") || "pA";
+const RECORDER_URL = "http://127.0.0.1:8000";
 
 // 問題データを取り出す。読み込めていなければ null（後段でエラー画面を出す）
 const PROBLEM = (typeof PROBLEMS !== "undefined" && PROBLEMS) ? PROBLEMS[PROBLEM_ID] : null;
@@ -412,6 +419,8 @@ function fitCode(){
    =================================================================== */
 
 let startPerf = null;      // 「開始する」を押した時点の performance.now()
+let recorderStarted = false;
+let recorderStopping = false;
 
 // Unix ミリ秒。Python の time.time() と比べるときは 1000 で割る
 function nowUnix(){ return Date.now(); }
@@ -968,6 +977,17 @@ function renderIntro(){
     '<div class="meta-field"><input id="exam-date" type="date"></div>';
   frag.appendChild(meta);
 
+  if (MODE === "learning"){
+    const recorder = document.createElement("div");
+    recorder.className = "recorder-box";
+    recorder.innerHTML =
+      '<div class="recorder-row">' +
+      '<button type="button" class="btn" id="recorder-start">記録開始</button>' +
+      '<span class="recorder-status" id="recorder-status">被験者IDを入力してから記録を開始してください。</span>' +
+      '</div>';
+    frag.appendChild(recorder);
+  }
+
   const info = document.createElement("div");
   info.className = "info";
   info.innerHTML =
@@ -1003,10 +1023,66 @@ function renderIntro(){
     if (!answers["meta.date"]) answers["meta.date"] = todayISO();
     bind(document.getElementById("subject-id"), "meta.subjectId");
     bind(document.getElementById("exam-date"), "meta.date");
+    const recorderButton = document.getElementById("recorder-start");
+    if (recorderButton) recorderButton.addEventListener("click", startRecorder);
     save();
   }, 0);
 
   return frag;
+}
+
+async function recorderRequest(action, query = {}){
+  const url = new URL(`${RECORDER_URL}/${action}`);
+  Object.entries(query).forEach(([key, value]) => url.searchParams.set(key, value));
+  const response = await fetch(url.toString());
+  let body = {};
+  try { body = await response.json(); } catch (e) {}
+  if (!response.ok) throw new Error(body.error || `記録サーバーエラー (${response.status})`);
+  return body;
+}
+
+async function startRecorder(){
+  const button = document.getElementById("recorder-start");
+  const status = document.getElementById("recorder-status");
+  const subjectId = (document.getElementById("subject-id").value || "").trim();
+  if (!subjectId){
+    status.className = "recorder-status error";
+    status.textContent = "被験者IDを入力してください。";
+    document.getElementById("subject-id").focus();
+    return;
+  }
+
+  button.disabled = true;
+  status.className = "recorder-status";
+  status.textContent = "デバイスを確認して記録を開始しています…";
+  try {
+    const result = await recorderRequest("start", {subject_id: subjectId, problem_id: PROBLEM_ID});
+    recorderStarted = true;
+    button.textContent = "記録中";
+    const missing = result.missing_devices || [];
+    status.className = `recorder-status ${missing.length ? "warn" : "ok"}`;
+    status.textContent = missing.length
+      ? `記録を開始しました。不足デバイス：${missing.join("、")}`
+      : "すべてのデバイスを確認し、記録を開始しました。";
+  } catch (e) {
+    button.disabled = false;
+    status.className = "recorder-status error";
+    status.textContent = `記録を開始できません：${e.message}`;
+  }
+}
+
+async function stopRecorder(){
+  if (MODE !== "learning" || !recorderStarted || recorderStopping) return;
+  recorderStopping = true;
+  try {
+    await recorderRequest("end");
+    recorderStarted = false;
+  } catch (e) {
+    console.error("記録を終了できませんでした:", e);
+    alert(`LSL記録を終了できませんでした。実験員にお知らせください。\n${e.message}`);
+  } finally {
+    recorderStopping = false;
+  }
 }
 
 function renderBlock(step, b, bi){
@@ -1363,6 +1439,18 @@ document.getElementById("hint-btn").addEventListener("click", requestHint);
 document.getElementById("next").addEventListener("click", () => {
   if (current >= STEPS.length - 1) return;
 
+  // 学習用は生体信号を収録してから課題を始める。
+  // デバイス不足は記録サーバー側で警告付きの成功になるため、ここでは妨げない。
+  if (MODE === "learning" && STEPS[current].kind === "intro" && !recorderStarted){
+    const status = document.getElementById("recorder-status");
+    if (status){
+      status.className = "recorder-status error";
+      status.textContent = "先に「記録開始」を押してください。";
+      status.scrollIntoView({behavior:"smooth", block:"center"});
+    }
+    return;
+  }
+
   // すべて埋まるまで次へ進めない（「はじめに」の被験者IDも対象）
   const missing = findMissing();
   if (missing.length){
@@ -1403,6 +1491,7 @@ function advance(){
     log.finishedAt        = nowStamp();
     log.finishedUnix      = nowUnix();
     log.finishedElapsedMs = elapsedMs();
+    stopRecorder();
   }
 
   save();
