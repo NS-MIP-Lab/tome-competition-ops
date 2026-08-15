@@ -62,6 +62,9 @@
     white-space:pre;width:100%;
     user-select:none;                /* 書き写し防止のため選択不可 */
   }
+  /* 視線とブロックを対応づけるため、行を個別の要素にしている。
+     見た目は1つの pre に流し込んでいたときと同じになるようにする */
+  #code .code-line{ height:1.55em; }
   #code .ln{
     display:inline-block;width:2.6em;text-align:right;
     margin-right:1.1em;color:var(--code-gutter);user-select:none;
@@ -371,6 +374,7 @@ const LOAD_ERROR = !PROBLEM
 const ALGORITHM_NAME = PROBLEM ? PROBLEM.name : "";
 const SOURCE_CODE    = PROBLEM ? PROBLEM.source : "";
 const STEPS          = PROBLEM ? PROBLEM.steps : [];
+const BLOCK_LABELS   = (PROBLEM && PROBLEM.blockLabels) || [];
 
 
 
@@ -381,12 +385,61 @@ const QUESTION_COUNT = STEPS.filter(s => s.id).length;
 const STORAGE_KEY = `design-doc:${PROBLEM_ID}:${MODE}`;
 
 /* ================= 左ペイン：行番号付きで描画し、はみ出さないよう自動縮小 ================= */
+/* ===================================================================
+   ソースコードの描画
+
+   視線データから「どのブロックを見ていたか」を判別できるようにするため、
+   行を1つずつ要素にしてブロックでまとめている。こうしないと画面上の
+   位置を測れない。見た目は1つの pre に流し込んでいたときと同じ。
+
+   ブロックの区切りは空行から自動的に導く。ソースコードを唯一の情報源に
+   しておき、定義を二重に持たない。
+   =================================================================== */
+
+// 空行でソースを区切り、ブロックの一覧を返す
+function splitBlocks(source){
+  const lines = source.split("\n");
+  const blocks = [];
+  let cur = null;
+  lines.forEach((line, i) => {
+    if (line.trim() === ""){
+      cur = null;                       // 空行はブロックの外
+    } else {
+      if (!cur){ cur = { lines: [] }; blocks.push(cur); }
+      cur.lines.push(i + 1);            // 行番号は1起点
+    }
+  });
+  return blocks.map((b, n) => ({
+    id: "B" + (n + 1),
+    label: (typeof BLOCK_LABELS !== "undefined" && BLOCK_LABELS[n]) || "B" + (n + 1),
+    開始行: b.lines[0],
+    終了行: b.lines[b.lines.length - 1],
+    行数: b.lines.length
+  }));
+}
+
+const CODE_BLOCKS = SOURCE_CODE ? splitBlocks(SOURCE_CODE) : [];
+let layout = null;              // 測定した幾何。書き出しに含める
+
 function renderCode(){
   const el = document.getElementById("code");
-  el.innerHTML = SOURCE_CODE.split("\n").map((line, i) => {
+  const lines = SOURCE_CODE.split("\n");
+
+  // どの行がどのブロックに属するかを引けるようにする
+  const ofLine = {};
+  CODE_BLOCKS.forEach(b => {
+    for (let n = b.開始行; n <= b.終了行; n++) ofLine[n] = b.id;
+  });
+
+  el.innerHTML = lines.map((line, i) => {
+    const no  = i + 1;
     const esc = line.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-    return `<span class="ln">${i + 1}</span>${esc}`;
-  }).join("\n");
+    const blk = ofLine[no] ? ` data-block="${ofLine[no]}"` : "";
+    // 空行にも行番号を出す。高さは CSS の height:1.55em で保つ
+    return `<div class="code-line" data-line="${no}"${blk}>`
+         + `<span class="ln">${no}</span>${esc}</div>`;
+  }).join("");
+
   fitCode();
 }
 function fitCode(){
@@ -399,6 +452,82 @@ function fitCode(){
     size -= 0.5;
     el.style.fontSize = size + "px";
   }
+  measureLayout();
+}
+
+/* ===================================================================
+   コード領域の幾何を測る
+
+   視線はサーフェスの正規化座標で得られるため、各ブロックの位置を
+   ウィンドウに対する正規化座標（0〜1）でも記録する。
+
+   判定領域は、隣り合うブロックとの中間線で区切ってコード領域全体を
+   隙間なく分割する。ブロックの矩形そのままだと、空行の上に視線が
+   落ちたときどこにも割り当てられない。1行だけのブロックも、
+   前後の空行の半分までを持てるようになる。
+   =================================================================== */
+function measureLayout(){
+  const el   = document.getElementById("code");
+  const wrap = document.getElementById("code-wrap");
+  if (!el || !CODE_BLOCKS.length) return;
+
+  const W = window.innerWidth, H = window.innerHeight;
+  const area = wrap.getBoundingClientRect();
+  const rectOf = n => {
+    const line = el.querySelector(`.code-line[data-line="${n}"]`);
+    return line ? line.getBoundingClientRect() : null;
+  };
+
+  // 各ブロックの実体（コード行だけ）の矩形
+  const solid = CODE_BLOCKS.map(b => {
+    const top = rectOf(b.開始行), bottom = rectOf(b.終了行);
+    return (top && bottom) ? { top: top.top, bottom: bottom.bottom } : null;
+  });
+  if (solid.some(s => !s)) return;
+
+  // 判定領域：上下の境界を隣接ブロックとの中間に置き、端は領域の縁まで広げる
+  const hit = solid.map((s, i) => ({
+    top:    i === 0 ? area.top : (solid[i - 1].bottom + s.top) / 2,
+    bottom: i === solid.length - 1 ? area.bottom : (s.bottom + solid[i + 1].top) / 2
+  }));
+
+  const px = v => Math.round(v * 10) / 10;
+  const nz = v => Math.round(v * 100000) / 100000;
+  const firstLine = rectOf(CODE_BLOCKS[0].開始行);
+
+  layout = {
+    測定時刻: nowStamp(),
+    ウィンドウ: { 幅: W, 高さ: H, 端末画素比: window.devicePixelRatio || 1 },
+    画面: { 幅: screen.width, 高さ: screen.height },
+    文字サイズpx: parseFloat(el.style.fontSize),
+    行ピッチpx: px(firstLine.height),
+    コード領域: {
+      左: px(area.left), 上: px(area.top), 右: px(area.right), 下: px(area.bottom),
+      正規化: { 左: nz(area.left / W), 上: nz(area.top / H),
+                右: nz(area.right / W), 下: nz(area.bottom / H) }
+    },
+    ブロック: CODE_BLOCKS.map((b, i) => ({
+      ブロックID: b.id, ラベル: b.label,
+      開始行: b.開始行, 終了行: b.終了行, 行数: b.行数,
+      // 視線の判定に使う領域（隣接と隙間なく接する）
+      判定領域: {
+        左: px(area.left), 上: px(hit[i].top), 右: px(area.right), 下: px(hit[i].bottom),
+        正規化: { 左: nz(area.left / W), 上: nz(hit[i].top / H),
+                  右: nz(area.right / W), 下: nz(hit[i].bottom / H) }
+      },
+      // 参考：コード行そのものの範囲
+      文字範囲: { 上: px(solid[i].top), 下: px(solid[i].bottom) }
+    })),
+    行: CODE_BLOCKS.flatMap(b => {
+      const out = [];
+      for (let n = b.開始行; n <= b.終了行; n++){
+        const r = rectOf(n);
+        if (r) out.push({ 行: n, ブロックID: b.id, 上: px(r.top), 下: px(r.bottom),
+                          正規化: { 上: nz(r.top / H), 下: nz(r.bottom / H) } });
+      }
+      return out;
+    })
+  };
 }
 
 /* ===================================================================
@@ -579,6 +708,7 @@ function render(){
       '<button class="btn" id="dl-json">JSONを保存</button>' +
       '<button class="btn ghost" id="dl-answers">回答CSVを保存</button>' +
       '<button class="btn ghost" id="dl-events">イベントCSVを保存</button>' +
+      '<button class="btn ghost" id="dl-layout">レイアウトCSVを保存</button>' +
       '</div>' +
       '<p style="margin-top:34px;font-size:13px;">― 実験員の方へ ―<br>' +
       'ファイルが保存されたことを確認してから、次の被験者へ進んでください。</p>' +
@@ -588,6 +718,7 @@ function render(){
     document.getElementById("dl-json").addEventListener("click", downloadJSON);
     document.getElementById("dl-answers").addEventListener("click", downloadAnswersCSV);
     document.getElementById("dl-events").addEventListener("click", downloadEventsCSV);
+    document.getElementById("dl-layout").addEventListener("click", downloadLayoutCSV);
     document.getElementById("next-subject").addEventListener("click", () => {
       if (confirm("この被験者の入力内容を消去して、問題と条件を選ぶ画面に戻ります。\n\n書き出したファイルを保存済みか確認してください。\n続けますか？")) resetAndGoTop();
     });
@@ -1345,6 +1476,7 @@ function header(){
 
 function downloadJSON(){
   const payload = Object.assign(header(), {
+    コード領域: layout,
     設問滞在: log.steps,
     設問別合計: 設問別合計(),
     ヒント要請: log.hints,
@@ -1429,10 +1561,38 @@ function downloadEventsCSV(){
   download(baseName() + "_events.csv", "text/csv", csv(rows));
 }
 
+/* コード領域の幾何（視線解析用）。1行1ブロック */
+function downloadLayoutCSV(){
+  const k = keyColumns();
+  const rows = [k.header.concat([
+    "ブロックID","ラベル","開始行","終了行","行数",
+    "判定領域_上px","判定領域_下px","判定領域_左px","判定領域_右px",
+    "判定領域_上_正規化","判定領域_下_正規化","判定領域_左_正規化","判定領域_右_正規化",
+    "文字範囲_上px","文字範囲_下px",
+    "ウィンドウ幅","ウィンドウ高さ","行ピッチpx","文字サイズpx"
+  ])];
+
+  if (layout){
+    layout.ブロック.forEach(b => {
+      const h = b.判定領域;
+      rows.push(k.values.concat([
+        b.ブロックID, b.ラベル, b.開始行, b.終了行, b.行数,
+        h.上, h.下, h.左, h.右,
+        h.正規化.上, h.正規化.下, h.正規化.左, h.正規化.右,
+        b.文字範囲.上, b.文字範囲.下,
+        layout.ウィンドウ.幅, layout.ウィンドウ.高さ, layout.行ピッチpx, layout.文字サイズpx
+      ]));
+    });
+  }
+
+  download(baseName() + "_layout.csv", "text/csv", csv(rows));
+}
+
 function exportAll(){
   downloadJSON();
   setTimeout(downloadAnswersCSV, 500);
   setTimeout(downloadEventsCSV, 1000);
+  setTimeout(downloadLayoutCSV, 1500);
 }
 
 document.getElementById("export-btn").addEventListener("click", exportAll);
