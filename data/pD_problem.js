@@ -62,7 +62,7 @@ int main(void)
     /* ------------------------------ Q1 ------------------------------ */
     {
       id:"Q1", title:"Q1　動作例：i = 2 のときの配列更新",
-      desc:"処理開始前は、prime[0]とprime[1]が0、prime[2]～prime[30]が1です。19～21行目について、jが12に達するまで追跡してください。記入例の行は採点対象外です。",
+      desc:"処理開始前は、prime[0]とprime[1]が0、prime[2]～prime[30]が1です。22～24行目について、jが12に達するまで追跡してください。記入例の行は採点対象外です。",
       blocks:[
         {
           type:"grid",
@@ -95,7 +95,7 @@ int main(void)
       id:"Q2", title:"Q2　各 for 文・if 文の具体的な条件",
       desc:"コードに書かれている値や条件式を、そのまま読み取って記入してください。目的の説明はまだ不要です。",
       blocks:[
-        {type:"subhead", text:"9～11行目の for 文"},
+        {type:"subhead", text:"10～12行目の for 文"},
         {
           type:"grid",
           headers:["確認項目","回答"],
@@ -108,7 +108,7 @@ int main(void)
             {cells:["代入する値", null]}
           ]
         },
-        {type:"subhead", text:"17～23行目の外側 for 文と if 文"},
+        {type:"subhead", text:"20～26行目の外側 for 文と if 文"},
         {
           type:"grid",
           headers:["確認項目","回答"],
@@ -120,7 +120,7 @@ int main(void)
             {cells:["内側 for 文を実行する条件", null]}
           ]
         },
-        {type:"subhead", text:"19～21行目の内側 for 文"},
+        {type:"subhead", text:"22～24行目の内側 for 文"},
         {
           type:"grid",
           headers:["確認項目","回答"],
@@ -155,14 +155,14 @@ int main(void)
             {cells:["使用できる最小の添字", null]},
             {cells:["使用できる最大の添字", null]},
             {cells:["prime[k]は整数何に対応する要素か", {pre:"整数", suf:"に対応する", w:"6em"}]},
-            {cells:["9～11行目で最初に値が代入される要素", {pre:"prime[", suf:"]", w:"6em"}]},
-            {cells:["9～11行目で最後に値が代入される要素", {pre:"prime[", suf:"]", w:"6em"}]},
-            {cells:["9～11行目で各要素に代入される値", null]},
-            {cells:["14行目の処理後の prime[0] の値", null]},
-            {cells:["14行目の処理後の prime[1] の値", null]},
-            {cells:["14行目の処理によって prime[2]～prime[MAX] の値が変わるか", {choice:["変わる","変わらない"]}]},
-            {cells:["19～21行目で値を変更する配列要素", {pre:"prime[", suf:"]", w:"6em"}]},
-            {cells:["19～21行目で prime[j] に代入する値", null]},
+            {cells:["10～12行目で最初に値が代入される要素", {pre:"prime[", suf:"]", w:"6em"}]},
+            {cells:["10～12行目で最後に値が代入される要素", {pre:"prime[", suf:"]", w:"6em"}]},
+            {cells:["10～12行目で各要素に代入される値", null]},
+            {cells:["16行目の処理後の prime[0] の値", null]},
+            {cells:["16行目の処理後の prime[1] の値", null]},
+            {cells:["16行目の処理によって prime[2]～prime[MAX] の値が変わるか", {choice:["変わる","変わらない"]}]},
+            {cells:["22～24行目で値を変更する配列要素", {pre:"prime[", suf:"]", w:"6em"}]},
+            {cells:["22～24行目で prime[j] に代入する値", null]},
             {cells:["代入後の prime[j] の値", null]}
           ]
         }
@@ -174,25 +174,25 @@ int main(void)
       id:"Q4", title:"Q4　コード範囲ごとの処理内容",
       desc:"処理名を考えるのではなく、指定された行で「何を確認し、どの値を変更するか」を記入してください。各コード範囲について、指定された空欄だけを埋めてください。",
       blocks:[
-        {type:"fill", lead:"9～11行目：", parts:[
+        {type:"fill", lead:"10～12行目：", parts:[
           "i = ", {b:"a1",w:"5em"}, " から ", {b:"a2",w:"5em"},
           " まで、prime[ i ] に値 ", {b:"a3",w:"5em"}, " を代入する。"
         ]},
-        {type:"fill", lead:"14行目：", parts:[
+        {type:"fill", lead:"16行目：", parts:[
           "prime[ ", {b:"b1",w:"4em"}, " ] と prime[ ", {b:"b2",w:"4em"},
           " ] に値 ", {b:"b3",w:"5em"}, " を代入する。"
         ]},
-        {type:"fill", lead:"17～18行目：", parts:[
+        {type:"fill", lead:"20～21行目：", parts:[
           "i = ", {b:"c1",w:"5em"}, " から始め、条件 ", {b:"c2",w:"14em"},
           " が成立する間、prime[i] が ", {b:"c3",w:"5em"}, " の場合に内側 for 文を実行する。"
         ]},
-        {type:"fill", lead:"19～21行目：", parts:[
+        {type:"fill", lead:"22～24行目：", parts:[
           "j = ", {b:"d1",w:"5em"}, " から始め、j が ", {b:"d2",w:"5em"},
           " 以下の間、j に ", {b:"d3",w:"5em"}, " を加えながら、prime[j] に値 ",
           {b:"d4",w:"5em"}, " を代入する。"
         ]},
         {type:"fill", lead:"処理後の状態：", parts:[
-          "19～21行目を1回実行すると、prime[ j ] の値は ", {b:"e1",w:"5em"}, " になる。"
+          "22～24行目を1回実行すると、prime[ j ] の値は ", {b:"e1",w:"5em"}, " になる。"
         ]}
       ]
     },
