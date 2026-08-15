@@ -36,14 +36,11 @@ PROBLEMS["pA"] = {
 
 int main(void)
 {
-    int a, b, r;
+    int a = 48, b = 18, r;
 
 
 
-    scanf("%d %d", &a, &b);
-
-
-
+    
     while (b != 0) {
         r = a % b;
         a = b;
