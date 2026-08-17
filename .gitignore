@@ -223,3 +223,6 @@ __marimo__/
 developer_key
 # macOS
 .DS_Store
+
+# 実験データ（被験者の回答）
+task_data/

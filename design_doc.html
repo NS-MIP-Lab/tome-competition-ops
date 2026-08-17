@@ -251,6 +251,14 @@
   }
   /* 完了画面のボタンは、収まらなければ折り返して縦に積む */
   .done-actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:24px;}
+  /* 完了画面の保存結果 */
+  .export-result{
+    border:1px solid var(--border);border-radius:8px;background:#f7f8fa;
+    padding:12px 16px;margin:0 0 20px;font-size:13px;line-height:1.8;
+    word-break:break-all;text-align:left;
+  }
+  .export-result.ok{border-color:#1b7f3b;background:#eefaf1;color:#155e2c;font-weight:600;}
+  .export-result.ng{border-color:var(--hint);background:#fdecec;color:#8e1c1c;font-weight:600;}
 
   .meta-grid{display:grid;grid-template-columns:auto 1fr;gap:10px 14px;align-items:center;margin-bottom:20px;}
   .meta-grid label{font-size:14px;font-weight:600;}
@@ -549,6 +557,7 @@ function measureLayout(){
 
 let startPerf = null;      // 「開始する」を押した時点の performance.now()
 let recorderStarted = false;
+let xdfFile = "";                 // 記録した XDF のパス（学習用のみ）
 let recorderStopping = false;
 
 // Unix ミリ秒。Python の time.time() と比べるときは 1000 で割る
@@ -702,7 +711,8 @@ function render(){
     setPrevVisible(false);
     body.innerHTML =
       '<div class="done"><h2>お疲れさまでした</h2>' +
-      '<p>すべての設問が終了しました。<br>回答ファイルの保存が始まります。<br>' +
+      '<div id="export-result" class="export-result">回答ファイルを保存しています…</div>' +
+      '<p>すべての設問が終了しました。<br>' +
       'この画面のまま実施者にお知らせください。</p>' +
       '<div class="done-actions">' +
       '<button class="btn" id="dl-json">JSONを保存</button>' +
@@ -1195,6 +1205,8 @@ async function startRecorder(){
   try {
     const result = await recorderRequest("start", {subject_id: subjectId, problem_id: PROBLEM_ID});
     recorderStarted = true;
+    // どの回答がどの生体データに対応するか、書き出しから辿れるようにする
+    xdfFile = result.file || "";
     button.textContent = "記録中";
     const missing = result.missing_devices || [];
     status.className = `recorder-status ${missing.length ? "warn" : "ok"}`;
@@ -1462,6 +1474,7 @@ function 設問別合計(){
 function header(){
   return {
     問題ID: PROBLEM_ID,
+    XDFファイル: xdfFile,
     モード: MODE_LABEL,
     アルゴリズム: ALGORITHM_NAME,
     被験者ID: answers["meta.subjectId"] || "",
@@ -1477,7 +1490,35 @@ function header(){
   };
 }
 
+/* ===================================================================
+   書き出す4ファイルの中身を組み立てる
+
+   保存の方法（記録サーバーへ送る／ダウンロードする）と、中身を作る処理を
+   分けている。同じ内容をどちらの経路でも使えるようにするため。
+   =================================================================== */
+function buildFiles(){
+  return [
+    { name: baseName() + ".json",         mime: "application/json", content: buildJSON() },
+    { name: baseName() + "_answers.csv",  mime: "text/csv",         content: buildAnswersCSV() },
+    { name: baseName() + "_events.csv",   mime: "text/csv",         content: buildEventsCSV() },
+    { name: baseName() + "_layout.csv",   mime: "text/csv",         content: buildLayoutCSV() }
+  ];
+}
+
 function downloadJSON(){
+  download(baseName() + ".json", "application/json", buildJSON());
+}
+function downloadAnswersCSV(){
+  download(baseName() + "_answers.csv", "text/csv", buildAnswersCSV());
+}
+function downloadEventsCSV(){
+  download(baseName() + "_events.csv", "text/csv", buildEventsCSV());
+}
+function downloadLayoutCSV(){
+  download(baseName() + "_layout.csv", "text/csv", buildLayoutCSV());
+}
+
+function buildJSON(){
   const payload = Object.assign(header(), {
     コード領域: layout,
     設問滞在: log.steps,
@@ -1491,7 +1532,7 @@ function downloadJSON(){
         回答: answers[f.key] || "", キー: f.key
       }))
   });
-  download(baseName() + ".json", "application/json", JSON.stringify(payload, null, 2));
+  return JSON.stringify(payload, null, 2);
 }
 
 // どのファイルにも入れる結合キー。問題ID・条件・被験者ID で3ファイルを突き合わせる
@@ -1504,7 +1545,7 @@ function keyColumns(){
 }
 
 /* 回答（採点用）。1行1項目。時刻はイベント側と JSON にあるので載せない */
-function downloadAnswersCSV(){
+function buildAnswersCSV(){
   const k = keyColumns();
   const rows = [k.header.concat(["設問","区分","項目","空欄","回答"])];
 
@@ -1514,11 +1555,11 @@ function downloadAnswersCSV(){
       rows.push(k.values.concat([f.stepId, f.section, f.item, f.blankNo, answers[f.key] || ""]));
     });
 
-  download(baseName() + "_answers.csv", "text/csv", csv(rows));
+  return csv(rows);
 }
 
 /* イベント（機械学習用）。1行1イベント。種別で行を選べばそのまま解析に使える */
-function downloadEventsCSV(){
+function buildEventsCSV(){
   const k = keyColumns();
   const h = header();
   const rows = [k.header.concat([
@@ -1561,11 +1602,11 @@ function downloadEventsCSV(){
         `${x.問題ID}／選択${x.選択番号}／正解${x.正解番号}／${x.正誤}`);
   });
 
-  download(baseName() + "_events.csv", "text/csv", csv(rows));
+  return csv(rows);
 }
 
 /* コード領域の幾何（視線解析用）。1行1ブロック */
-function downloadLayoutCSV(){
+function buildLayoutCSV(){
   const k = keyColumns();
   const rows = [k.header.concat([
     "ブロックID","ラベル","開始行","終了行","行数",
@@ -1588,14 +1629,56 @@ function downloadLayoutCSV(){
     });
   }
 
-  download(baseName() + "_layout.csv", "text/csv", csv(rows));
+  return csv(rows);
 }
 
-function exportAll(){
-  downloadJSON();
-  setTimeout(downloadAnswersCSV, 500);
-  setTimeout(downloadEventsCSV, 1000);
-  setTimeout(downloadLayoutCSV, 1500);
+/* ===================================================================
+   書き出し
+
+   まず記録サーバーへ送り、task_data/<被験者ID>/ に保存させる。
+   ブラウザは任意のフォルダへ直接書けないため、この経路をとる。
+
+   サーバーが起動していない、被験者IDが使えない文字を含むなどで失敗した
+   場合は、これまでどおりダウンロードに切り替える。どちらの条件でも
+   実施できるようにするため、失敗しても実験は止めない。
+   =================================================================== */
+function downloadAll(){
+  const files = buildFiles();
+  files.forEach((f, i) => setTimeout(() => download(f.name, f.mime, f.content), i * 500));
+}
+
+async function exportAll(){
+  const files = buildFiles();
+  const subject = (answers["meta.subjectId"] || "").trim();
+
+  try {
+    const res = await fetch(`${RECORDER_URL}/save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subject_id: subject,
+        files: files.map(f => ({ name: f.name, content: f.content }))
+      })
+    });
+    let body = {};
+    try { body = await res.json(); } catch (e) {}
+    if (!res.ok) throw new Error(body.error || `記録サーバーエラー (${res.status})`);
+
+    showExportResult(true, `${body.dir} に ${body.files.length} 件保存しました。`);
+  } catch (e) {
+    // 保存できなかった場合はダウンロードに切り替える
+    downloadAll();
+    showExportResult(false,
+      `フォルダへ保存できなかったため、ダウンロードしました：${e.message}`);
+  }
+}
+
+// 完了画面に保存結果を出す
+function showExportResult(ok, message){
+  const box = document.getElementById("export-result");
+  if (!box) return;
+  box.className = "export-result " + (ok ? "ok" : "ng");
+  box.textContent = message;
 }
 
 document.getElementById("export-btn").addEventListener("click", exportAll);
