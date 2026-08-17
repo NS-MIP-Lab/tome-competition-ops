@@ -181,6 +181,14 @@
   .warn p{margin:0 0 10px;color:#8e1c1c;}
   .warn .btn{padding:7px 18px;font-size:14px;}
 
+  /* 動作確認で空欄を埋めたときの印。本番データと取り違えないよう出したままにする */
+  #debug-badge{
+    position:fixed;left:8px;bottom:8px;z-index:10000;
+    background:#7a4a00;color:#fff;border-radius:5px;
+    padding:3px 10px;font-size:11px;font-weight:700;letter-spacing:.04em;
+    pointer-events:none;opacity:.85;
+  }
+
   /* ===== 未入力チェック ===== */
   #validation-msg{
     border:1.5px solid var(--hint);background:#fdecec;color:#8e1c1c;
@@ -829,6 +837,72 @@ function findMissing(){
     (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1);
 }
 
+/* ===================================================================
+   動作確認用：空欄をまとめて埋める
+
+   Ctrl + Shift + D で、いま画面に出ている空欄を埋める。進むのは手動のまま。
+
+   値は直接入れず、入れたあとにイベントを発火させる。そうすれば既存の
+   bind() と makeChoices() の処理が動き、保存・赤枠の解除・高さの調整が
+   そのまま働く。同じ処理を二重に書かない。
+
+   使ったら画面に印を出し、書き出しにも記録する。本番のデータに紛れても
+   必ず分かるようにするため。
+   =================================================================== */
+let debugUsed = false;
+
+function debugFill(){
+  let filled = 0;
+
+  const setValue = (el, value) => {
+    el.value = value;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    filled++;
+  };
+  const pickFirst = box => {
+    const radio = box.querySelector("input[type=radio]");
+    if (!radio) return;
+    radio.checked = true;
+    radio.dispatchEvent(new Event("change", { bubbles: true }));
+    filled++;
+  };
+
+  // 進行を止めている欄は findMissing() がそのまま返してくれる
+  findMissing().forEach(el => {
+    if (el.classList.contains("choices")) pickFirst(el);
+    // 被験者IDは半角英数字でないと保存機能を通らない
+    else if (el.classList.contains("required-meta")) setValue(el, "debug");
+    else setValue(el, "DEBUG");
+  });
+
+  // 理解度テストが開いていれば、そこも選ぶ
+  const quizItem = document.querySelector("#quiz-body .quiz-item");
+  if (quizItem && !quizItem.querySelector("input:checked")) pickFirst(quizItem);
+
+  if (filled) markDebugUsed();
+  return filled;
+}
+
+// 一度でも使ったら、画面の隅に印を出したままにする
+function markDebugUsed(){
+  debugUsed = true;
+  let badge = document.getElementById("debug-badge");
+  if (!badge){
+    badge = document.createElement("div");
+    badge.id = "debug-badge";
+    badge.textContent = "デバッグ入力あり";
+    document.body.appendChild(badge);
+  }
+}
+
+document.addEventListener("keydown", e => {
+  if (e.ctrlKey && e.shiftKey && (e.key === "D" || e.key === "d" || e.code === "KeyD")){
+    e.preventDefault();
+    const n = debugFill();
+    console.info(`[デバッグ] ${n} 件の空欄を埋めました`);
+  }
+});
+
 // 「ここが空欄」の表示を付ける
 function markMissing(el){
   if (el.classList.contains("missing")) return;
@@ -1436,7 +1510,9 @@ function buildFieldIndex(){
 /* ================= ファイル書き出し ================= */
 function baseName(){
   const id = (answers["meta.subjectId"] || "noID").replace(/[^\w\-一-龠ぁ-んァ-ヶ]/g, "_");
-  return `design_${PROBLEM_ID}_${MODE}_${id}_${fileStamp()}`;
+  // 動作確認で埋めたデータは、フォルダに紛れても一目で分かるようにする
+  const prefix = debugUsed ? "debug_" : "";
+  return `${prefix}design_${PROBLEM_ID}_${MODE}_${id}_${fileStamp()}`;
 }
 function download(filename, mime, text){
   const blob = new Blob([text], {type: mime});
@@ -1474,6 +1550,7 @@ function 設問別合計(){
 function header(){
   return {
     問題ID: PROBLEM_ID,
+    デバッグ入力: debugUsed ? "あり" : "なし",
     XDFファイル: xdfFile,
     モード: MODE_LABEL,
     アルゴリズム: ALGORITHM_NAME,
