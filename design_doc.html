@@ -906,7 +906,8 @@ function renderQuizItem(){
 
   const q = document.createElement("p");
   q.className = "quiz-q";
-  q.innerHTML = `<span class="no">問${i + 1}</span>`;
+  // 1問しかない設問では「問1」を出さない（番号を振る意味がないため）
+  if (items.length > 1) q.innerHTML = `<span class="no">問${i + 1}</span>`;
   q.appendChild(document.createTextNode(item.question || ""));
   wrap.appendChild(q);
 
@@ -935,7 +936,9 @@ function renderQuizItem(){
   quizContext.shownUnix    = nowUnix();
   quizContext.shownElapsed = elapsedMs();
 
-  document.getElementById("quiz-count").textContent = `${i + 1} / ${items.length} 問`;
+  // 進捗も複数問あるときだけ出す
+  document.getElementById("quiz-count").textContent =
+    items.length > 1 ? `${i + 1} / ${items.length} 問` : "";
   document.getElementById("quiz-submit").textContent =
     (i === items.length - 1) ? "回答して次へ進む" : "次の問題へ";
   body.scrollTop = 0;
