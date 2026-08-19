@@ -23,6 +23,16 @@ PORT = 8000
 LABRECORDER_HOST = "127.0.0.1"
 LABRECORDER_RCS_PORT = 22345
 
+# RCSへの接続失敗と、コマンド処理待ちのタイムアウトを分けて扱う。
+# stopはXDFのflush/closeに時間がかかることがあるため長めに待つ。
+LABRECORDER_CONNECT_TIMEOUT = 3.0
+LABRECORDER_COMMAND_TIMEOUT = 10.0
+LABRECORDER_STOP_TIMEOUT = 60.0
+
+XDF_CREATE_TIMEOUT = 10.0
+XDF_FINALIZE_TIMEOUT = 30.0
+XDF_STABLE_SECONDS = 1.0
+
 # JSON / CSV / XDF をすべてここへまとめる
 TASK_DATA_DIR = Path(__file__).resolve().parent.parent / "task_data"
 
@@ -79,22 +89,183 @@ def push_marker(value):
 # LabRecorder Remote Control
 # ============================================================
 
-def send_labrecorder(*commands):
+class LabRecorderConnectionError(RuntimeError):
+    """LabRecorderのRCSへ接続・送信できなかった。"""
+
+
+class LabRecorderResponseTimeout(RuntimeError):
+    """コマンド送信後、LabRecorderからOKが返る前にタイムアウトした。"""
+
+
+def _recv_exact(sock, size):
+    data = b""
+
+    while len(data) < size:
+        chunk = sock.recv(
+            size - len(data)
+        )
+
+        if not chunk:
+            raise RuntimeError(
+                "LabRecorderから応答が返る前に接続が切れました"
+            )
+
+        data += chunk
+
+    return data
+
+
+def send_labrecorder(
+    *commands,
+    response_timeout=LABRECORDER_COMMAND_TIMEOUT,
+):
+    """
+    LabRecorder RCSへコマンドを送り、
+    各コマンドに対する "OK" 応答まで待つ。
+
+    接続できない場合と、
+    LabRecorder内部の処理に時間がかかっている場合を区別する。
+    """
     try:
-        with socket.create_connection(
-            (LABRECORDER_HOST, LABRECORDER_RCS_PORT),
-            timeout=3,
-        ) as sock:
-            for command in commands:
-                sock.sendall(
-                    (command + "\n").encode("utf-8")
-                )
+        sock = socket.create_connection(
+            (
+                LABRECORDER_HOST,
+                LABRECORDER_RCS_PORT,
+            ),
+            timeout=LABRECORDER_CONNECT_TIMEOUT,
+        )
 
     except OSError as e:
-        raise RuntimeError(
-            "LabRecorderに接続できません。"
-            "LabRecorderを起動してEnableRCSをONにしてください。"
+        raise LabRecorderConnectionError(
+            "LabRecorderのRCSに接続できません。"
+            "LabRecorderを起動し、EnableRCSがONで、"
+            f"ポート{LABRECORDER_RCS_PORT}になっているか確認してください。"
         ) from e
+
+    with sock:
+        sock.settimeout(
+            response_timeout
+        )
+
+        for command in commands:
+            try:
+                sock.sendall(
+                    (
+                        command
+                        + "\n"
+                    ).encode(
+                        "utf-8"
+                    )
+                )
+
+            except OSError as e:
+                raise LabRecorderConnectionError(
+                    "LabRecorderへRCSコマンドを送信できませんでした: "
+                    + command
+                ) from e
+
+            try:
+                response = _recv_exact(
+                    sock,
+                    2,
+                )
+
+            except (socket.timeout, TimeoutError) as e:
+                raise LabRecorderResponseTimeout(
+                    "LabRecorderのRCSコマンド処理がタイムアウトしました: "
+                    + command
+                ) from e
+
+            if response != b"OK":
+                raise RuntimeError(
+                    "LabRecorderから予期しない応答を受け取りました: "
+                    + repr(response)
+                )
+
+
+def wait_for_xdf_created(
+    path,
+    timeout=XDF_CREATE_TIMEOUT,
+):
+    deadline = (
+        time.monotonic()
+        + timeout
+    )
+
+    while time.monotonic() < deadline:
+        if path.is_file():
+            return True
+
+        time.sleep(
+            0.05
+        )
+
+    return path.is_file()
+
+
+def wait_for_xdf_finalized(
+    path,
+    timeout=XDF_FINALIZE_TIMEOUT,
+    stable_seconds=XDF_STABLE_SECONDS,
+):
+    """
+    XDFが存在し、0 byteではなく、
+    一定時間サイズが変化しないことを確認する。
+
+    stopの直後だけでなく、RCSのstop応答がタイムアウトした場合にも使う。
+    """
+    interval = 0.20
+    stable_required = max(
+        1,
+        int(
+            stable_seconds
+            / interval
+        ),
+    )
+
+    deadline = (
+        time.monotonic()
+        + timeout
+    )
+
+    previous_size = None
+    stable_count = 0
+
+    while time.monotonic() < deadline:
+        try:
+            size = path.stat().st_size
+
+        except FileNotFoundError:
+            size = 0
+
+        if size > 0:
+            if size == previous_size:
+                stable_count += 1
+
+                if stable_count >= stable_required:
+                    return True
+
+            else:
+                stable_count = 0
+
+            previous_size = size
+
+        else:
+            stable_count = 0
+            previous_size = size
+
+        time.sleep(
+            interval
+        )
+
+    try:
+        return (
+            path.is_file()
+            and path.stat().st_size > 0
+        )
+
+    except FileNotFoundError:
+        return False
 
 
 # ============================================================
@@ -267,22 +438,70 @@ def start_recording(
         f"{subject_id}_{timestamp}.xdf"
     )
 
-    current_file = (
-        output_dir / filename
+    output_file = (
+        output_dir
+        / filename
     )
 
     root = (
-        str(output_dir.resolve())
+        str(
+            output_dir.resolve()
+        )
         + "/"
     )
 
-    # ここでは「XDF記録開始」だけ。
-    # task_start は /task_start で別に記録する。
-    send_labrecorder(
-        f"filename {{root:{root}}} {{template:{filename}}}",
-        "start",
+    # LabRecorderはRCSで受け取ったtemplate文字列を小文字化する。
+    # problem_id / subject_id の大文字小文字を保持するため、
+    # それらはtemplateへ直接埋めず %b / %p として渡す。
+    template = (
+        f"design_%b_{mode}_"
+        f"%p_{timestamp}.xdf"
     )
 
+    filename_command = (
+        f"filename "
+        f"{{root:{root}}} "
+        f"{{template:{template}}} "
+        f"{{participant:{subject_id}}} "
+        f"{{task:{problem_id}}}"
+    )
+
+    # 先にLabRecorder自身のstream一覧を更新し、
+    # その後すべて選択してから記録を始める。
+    #
+    # 各コマンドは send_labrecorder() 内で
+    # LabRecorderからの "OK" まで待つ。
+    try:
+        send_labrecorder(
+            "update",
+            "select all",
+            filename_command,
+            "start",
+            response_timeout=LABRECORDER_COMMAND_TIMEOUT,
+        )
+
+        # startのOKだけでなく、実ファイルが作られたことも確認する。
+        if not wait_for_xdf_created(
+            output_file
+        ):
+            try:
+                send_labrecorder(
+                    "stop"
+                )
+            except Exception:
+                pass
+
+            raise RuntimeError(
+                "LabRecorderはstartに応答しましたが、"
+                "XDFファイルが作成されませんでした: "
+                + str(output_file)
+            )
+
+    except Exception:
+        # start失敗時はPython側をrecording状態にしない。
+        raise
+
+    current_file = output_file
     recording = True
     task_started = False
     current_subject_id = subject_id
@@ -364,23 +583,96 @@ def end_recording():
             "task_end"
         )
 
-        # LabRecorderがmarkerを受け取る時間を少し確保する。
-        time.sleep(0.05)
+        # markerがLabRecorder側へ届く時間を確保する。
+        time.sleep(
+            0.10
+        )
 
-    send_labrecorder(
-        "stop"
+    stop_timed_out = False
+
+    try:
+        # stopRecording() ではXDFのflush/closeが走るため、
+        # update/start等より長く待つ。
+        send_labrecorder(
+            "stop",
+            response_timeout=LABRECORDER_STOP_TIMEOUT,
+        )
+
+    except LabRecorderResponseTimeout as e:
+        # stopコマンド自体は送信済み。
+        # LabRecorderがXDFを閉じるのに時間がかかった可能性が高いので、
+        # 「RCSが無効」とは扱わず、実ファイルを確認する。
+        stop_timed_out = True
+
+        print(
+            "WARNING:",
+            str(e),
+        )
+        print(
+            "WARNING: stopの応答はタイムアウトしました。"
+            "XDFの保存状態を確認します。"
+        )
+
+    # stopを送信した時点で、新しいsupport等を受け付けない。
+    recording = False
+    task_started = False
+
+    # XDFが実際に存在し、書き込みが落ち着いたことを確認する。
+    finalized = wait_for_xdf_finalized(
+        saved_file
     )
 
-    recording = False
+    if not finalized and stop_timed_out:
+        # 1回目のstopが処理済みなら、この2回目は即OKになる。
+        # まだ処理中だった場合にも、手動で「終了」を押し直す代わりになる。
+        print(
+            "WARNING: XDFの確定を確認できないため、"
+            "LabRecorderへstopを1回だけ再送します。"
+        )
+
+        try:
+            send_labrecorder(
+                "stop",
+                response_timeout=LABRECORDER_COMMAND_TIMEOUT,
+            )
+
+        except LabRecorderResponseTimeout:
+            print(
+                "WARNING: stop再送の応答もタイムアウトしました。"
+            )
+
+        except LabRecorderConnectionError:
+            # すでに停止・終了しているケースもあるので、
+            # 最終判断は下のXDF実ファイル確認で行う。
+            print(
+                "WARNING: stop再送時にRCSへ接続できませんでした。"
+            )
+
+        finalized = wait_for_xdf_finalized(
+            saved_file
+        )
+
+    if not finalized:
+        raise RuntimeError(
+            "LabRecorderへstopは送信しましたが、"
+            "XDFファイルの保存完了を確認できませんでした: "
+            + str(saved_file)
+        )
+
+    file_size = (
+        saved_file.stat().st_size
+    )
+
     current_file = None
     current_subject_id = None
     current_problem_id = None
     current_mode = None
-    task_started = False
 
     return {
         "status": "saved",
         "file": str(saved_file),
+        "size_bytes": file_size,
+        "stop_response_timed_out": stop_timed_out,
     }
 
 
@@ -629,6 +921,17 @@ class Handler(
                         "subject_id": current_subject_id,
                         "problem_id": current_problem_id,
                         "mode": current_mode,
+                        "file_exists": (
+                            current_file.is_file()
+                            if current_file
+                            else False
+                        ),
+                        "file_size_bytes": (
+                            current_file.stat().st_size
+                            if current_file
+                            and current_file.is_file()
+                            else 0
+                        ),
                         "missing_devices": get_missing_devices(),
                     }
 
