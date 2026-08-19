@@ -23,30 +23,24 @@ PORT = 8000
 LABRECORDER_HOST = "127.0.0.1"
 LABRECORDER_RCS_PORT = 22345
 
-RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
-
-# 課題ページが書き出す回答ファイルの保存先。
-# 被験者ごとに分ける。
+# JSON / CSV / XDF をすべてここへまとめる
 TASK_DATA_DIR = Path(__file__).resolve().parent.parent / "task_data"
 
 
 lock = threading.Lock()
+
 recording = False
 current_file = None
+current_subject_id = None
+current_problem_id = None
+current_mode = None
+task_started = False
 
 
-# ----------------------------------------------------------------------
+# ============================================================
 # ExperimentMarkers
-# ----------------------------------------------------------------------
-#
-# recorder_server 自身が marker LSL stream を持つ。
-# これにより experiment_markers.py を別プロセスで起動する必要はない。
-#
-# 記録するイベント:
-#   task_start
-#   task_end
-#   support_request
-#
+# ============================================================
+
 marker_info = StreamInfo(
     name="ExperimentMarkers",
     type="Markers",
@@ -69,19 +63,21 @@ marker_outlet = StreamOutlet(marker_info)
 
 
 def push_marker(value):
-    """実験イベントをLSLへ流し、そのLSL timestampを返す。"""
     timestamp = local_clock()
+
     marker_outlet.push_sample(
         [str(value)],
         timestamp=timestamp,
     )
+
     print(f"MARKER {timestamp:.6f} {value}")
+
     return timestamp
 
 
-# ----------------------------------------------------------------------
-# LabRecorder Remote Control Server
-# ----------------------------------------------------------------------
+# ============================================================
+# LabRecorder Remote Control
+# ============================================================
 
 def send_labrecorder(*commands):
     try:
@@ -90,7 +86,9 @@ def send_labrecorder(*commands):
             timeout=3,
         ) as sock:
             for command in commands:
-                sock.sendall((command + "\n").encode("utf-8"))
+                sock.sendall(
+                    (command + "\n").encode("utf-8")
+                )
 
     except OSError as e:
         raise RuntimeError(
@@ -99,18 +97,11 @@ def send_labrecorder(*commands):
         ) from e
 
 
-# ----------------------------------------------------------------------
-# LSL stream presence check
-# ----------------------------------------------------------------------
+# ============================================================
+# LSL stream check
+# ============================================================
 
 def get_visible_streams():
-    """
-    現在見えているLSL streamを1回だけ探索して、
-    {(name, type), ...} として返す。
-
-    resolve_bypropを各stream名ごとに呼ぶより、
-    start時の待ち時間を短くするため1回の探索にまとめる。
-    """
     streams = resolve_streams(wait_time=1.0)
 
     visible = set()
@@ -124,37 +115,16 @@ def get_visible_streams():
                 )
             )
         except Exception:
-            # 1つの壊れた/消失したstreamのために
-            # 全体のmissing判定を失敗させない。
             continue
 
     return visible
 
 
 def get_missing_devices():
-    """
-    研究用の最小LSL構成を確認する。
-
-    Muse:
-      Muse / EEG
-      Muse / ACC
-
-    Garmin:
-      GarminVenu3S / HeartRateRR
-
-    Pupil:
-      PupilGaze
-      PupilPupillometry
-      PupilFixations
-      PupilSurface
-
-    ExperimentMarkersはこのserver自身が生成するため、
-    missing device判定の対象にしない。
-    """
     visible = get_visible_streams()
     missing = []
 
-    # MuseはnameだけでなくEEGとACCの両方を見る。
+    # Muse
     muse_eeg_ok = ("Muse", "EEG") in visible
     muse_acc_ok = ("Muse", "ACC") in visible
 
@@ -170,7 +140,7 @@ def get_missing_devices():
     if not garmin_ok:
         missing.append("Garmin Venu 3S")
 
-    # 研究用Pupil Relayの4 stream
+    # Pupil
     required_pupil_names = {
         "PupilGaze",
         "PupilPupillometry",
@@ -183,15 +153,17 @@ def get_missing_devices():
         for name, _stream_type in visible
     }
 
-    if not required_pupil_names.issubset(visible_names):
+    if not required_pupil_names.issubset(
+        visible_names
+    ):
         missing.append("Pupil Labs Core")
 
     return missing
 
 
-# ----------------------------------------------------------------------
-# Recording
-# ----------------------------------------------------------------------
+# ============================================================
+# Validation
+# ============================================================
 
 def safe_component(value, label):
     value = value.strip()
@@ -207,138 +179,7 @@ def safe_component(value, label):
     return value
 
 
-def start_recording(subject_id, problem_id):
-    global recording, current_file
-
-    if recording:
-        return {
-            "status": "already recording",
-            "file": str(current_file),
-            "missing_devices": get_missing_devices(),
-        }
-
-    subject_id = safe_component(
-        subject_id,
-        "被験者ID",
-    )
-
-    problem_id = safe_component(
-        problem_id,
-        "問題ID",
-    )
-
-    # センサーが足りなくても記録自体は開始する。
-    missing = get_missing_devices()
-
-    output_dir = RESULTS_DIR / problem_id
-    output_dir.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    timestamp = datetime.now().strftime(
-        "%Y%m%d_%H%M%S"
-    )
-
-    filename = (
-        f"{subject_id}_{timestamp}.xdf"
-    )
-
-    current_file = output_dir / filename
-
-    root = str(
-        output_dir.resolve()
-    ) + "/"
-
-    # LabRecorderを先に記録状態へする。
-    send_labrecorder(
-        f"filename {{root:{root}}} {{template:{filename}}}",
-        "start",
-    )
-
-    recording = True
-
-    # task_startはLabRecorder startの後に送る。
-    # LabRecorder側のinletへ到達するためのsample自体の時刻は
-    # push_marker内のlocal_clock()。
-    marker_timestamp = push_marker(
-        "task_start"
-    )
-
-    return {
-        "status": "recording",
-        "file": str(current_file),
-        "missing_devices": missing,
-        "marker": "task_start",
-        "marker_lsl_timestamp": marker_timestamp,
-    }
-
-
-def end_recording():
-    global recording, current_file
-
-    if not recording:
-        raise RuntimeError(
-            "記録中ではありません"
-        )
-
-    saved_file = current_file
-
-    # stopより先にtask_endをLSLへ入れる。
-    marker_timestamp = push_marker(
-        "task_end"
-    )
-
-    # LabRecorderのLSL inletがmarkerを取り込む時間を少しだけ確保。
-    # marker自身のtimestampはsleep前に確定している。
-    time.sleep(0.05)
-
-    send_labrecorder("stop")
-
-    recording = False
-    current_file = None
-
-    return {
-        "status": "saved",
-        "file": str(saved_file),
-        "marker": "task_end",
-        "marker_lsl_timestamp": marker_timestamp,
-    }
-
-
-def support_request():
-    """
-    被験者の支援要求を教師ラベルとしてLSLへ記録する。
-    XDF記録外のsupport_requestを作らないため、記録中だけ許可する。
-    """
-    if not recording:
-        raise RuntimeError(
-            "記録中ではないためsupport_requestを記録できません"
-        )
-
-    timestamp = push_marker(
-        "support_request"
-    )
-
-    return {
-        "status": "marked",
-        "marker": "support_request",
-        "marker_lsl_timestamp": timestamp,
-    }
-
-
-# ----------------------------------------------------------------------
-# Task data
-# ----------------------------------------------------------------------
-
 def safe_filename(value):
-    """
-    課題ページから受け取ったファイル名を検証する。
-
-    ブラウザから届いた文字列でファイルを書くため、
-    パス区切りや .. を含むものは弾き、
-    task_data の外に出られないようにする。
-    """
     value = value.strip()
 
     if not value or not re.fullmatch(
@@ -357,17 +198,215 @@ def safe_filename(value):
     return value
 
 
-def save_task_data(subject_id, files):
-    """
-    課題ページの書き出しを
-    task_data/<被験者ID>/ に保存する。
-    """
+# ============================================================
+# XDF recording
+# ============================================================
+
+def start_recording(
+    subject_id,
+    problem_id,
+    mode,
+):
+    global recording
+    global current_file
+    global current_subject_id
+    global current_problem_id
+    global current_mode
+    global task_started
+
+    if recording:
+        return {
+            "status": "already recording",
+            "file": str(current_file),
+            "missing_devices": get_missing_devices(),
+        }
+
     subject_id = safe_component(
         subject_id,
         "被験者ID",
     )
 
-    if not isinstance(files, list) or not files:
+    problem_id = safe_component(
+        problem_id,
+        "問題ID",
+    )
+
+    mode = safe_component(
+        mode,
+        "モード",
+    )
+
+    if mode not in {
+        "learning",
+        "test",
+    }:
+        raise ValueError(
+            "モードは learning または test を指定してください"
+        )
+
+    missing = get_missing_devices()
+
+    # task_data/S01/pA/
+    output_dir = (
+        TASK_DATA_DIR
+        / subject_id
+        / problem_id
+    )
+
+    output_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    timestamp = datetime.now().strftime(
+        "%Y%m%d_%H%M%S"
+    )
+
+    filename = (
+        f"design_{problem_id}_{mode}_"
+        f"{subject_id}_{timestamp}.xdf"
+    )
+
+    current_file = (
+        output_dir / filename
+    )
+
+    root = (
+        str(output_dir.resolve())
+        + "/"
+    )
+
+    # ここでは「XDF記録開始」だけ。
+    # task_start は /task_start で別に記録する。
+    send_labrecorder(
+        f"filename {{root:{root}}} {{template:{filename}}}",
+        "start",
+    )
+
+    recording = True
+    task_started = False
+    current_subject_id = subject_id
+    current_problem_id = problem_id
+    current_mode = mode
+
+    return {
+        "status": "recording",
+        "file": str(current_file),
+        "missing_devices": missing,
+    }
+
+
+def mark_task_start():
+    global task_started
+
+    if not recording:
+        raise RuntimeError(
+            "XDF記録中ではありません"
+        )
+
+    if task_started:
+        return {
+            "status": "already marked",
+            "marker": "task_start",
+        }
+
+    push_marker(
+        "task_start"
+    )
+
+    task_started = True
+
+    return {
+        "status": "marked",
+        "marker": "task_start",
+    }
+
+
+def support():
+    if not recording:
+        raise RuntimeError(
+            "XDF記録中ではありません"
+        )
+
+    if not task_started:
+        raise RuntimeError(
+            "課題開始前のためsupportを記録できません"
+        )
+
+    push_marker(
+        "support"
+    )
+
+    return {
+        "status": "marked",
+        "marker": "support",
+    }
+
+
+def end_recording():
+    global recording
+    global current_file
+    global current_subject_id
+    global current_problem_id
+    global current_mode
+    global task_started
+
+    if not recording:
+        raise RuntimeError(
+            "記録中ではありません"
+        )
+
+    saved_file = current_file
+
+    # 課題が実際に始まっている場合だけ task_end を入れる。
+    if task_started:
+        push_marker(
+            "task_end"
+        )
+
+        # LabRecorderがmarkerを受け取る時間を少し確保する。
+        time.sleep(0.05)
+
+    send_labrecorder(
+        "stop"
+    )
+
+    recording = False
+    current_file = None
+    current_subject_id = None
+    current_problem_id = None
+    current_mode = None
+    task_started = False
+
+    return {
+        "status": "saved",
+        "file": str(saved_file),
+    }
+
+
+# ============================================================
+# JSON / CSV save
+# ============================================================
+
+def save_task_data(
+    subject_id,
+    problem_id,
+    files,
+):
+    subject_id = safe_component(
+        subject_id,
+        "被験者ID",
+    )
+
+    problem_id = safe_component(
+        problem_id,
+        "問題ID",
+    )
+
+    if not isinstance(
+        files,
+        list,
+    ) or not files:
         raise ValueError(
             "保存するファイルがありません"
         )
@@ -376,22 +415,38 @@ def save_task_data(subject_id, files):
 
     for item in files:
         name = safe_filename(
-            str(item.get("name", ""))
+            str(
+                item.get(
+                    "name",
+                    "",
+                )
+            )
         )
 
-        content = item.get("content")
+        content = item.get(
+            "content"
+        )
 
-        if not isinstance(content, str):
+        if not isinstance(
+            content,
+            str,
+        ):
             raise ValueError(
                 f"{name} の中身が文字列ではありません"
             )
 
         prepared.append(
-            (name, content)
+            (
+                name,
+                content,
+            )
         )
 
+    # task_data/S01/pA/
     output_dir = (
-        TASK_DATA_DIR / subject_id
+        TASK_DATA_DIR
+        / subject_id
+        / problem_id
     )
 
     output_dir.mkdir(
@@ -399,12 +454,13 @@ def save_task_data(subject_id, files):
         exist_ok=True,
     )
 
-    # 上書きは行わない。
-    # 1つでも既にあれば、何も書かずに知らせる。
+    # 上書きしない
     existing = [
         name
         for name, _content in prepared
-        if (output_dir / name).exists()
+        if (
+            output_dir / name
+        ).exists()
     ]
 
     if existing:
@@ -416,10 +472,10 @@ def save_task_data(subject_id, files):
     saved = []
 
     for name, content in prepared:
-        path = output_dir / name
+        path = (
+            output_dir / name
+        )
 
-        # 解決後のパスが保存先の中に収まっているか、
-        # 書く直前にもう一度確かめる。
         if (
             output_dir.resolve()
             not in path.resolve().parents
@@ -433,7 +489,9 @@ def save_task_data(subject_id, files):
             encoding="utf-8",
         )
 
-        saved.append(name)
+        saved.append(
+            name
+        )
 
     return {
         "status": "saved",
@@ -442,18 +500,28 @@ def save_task_data(subject_id, files):
     }
 
 
-# ----------------------------------------------------------------------
+# ============================================================
 # HTTP
-# ----------------------------------------------------------------------
+# ============================================================
 
-class Handler(BaseHTTPRequestHandler):
-    def send_json(self, status, data):
+class Handler(
+    BaseHTTPRequestHandler
+):
+    def send_json(
+        self,
+        status,
+        data,
+    ):
         body = json.dumps(
             data,
             ensure_ascii=False,
-        ).encode("utf-8")
+        ).encode(
+            "utf-8"
+        )
 
-        self.send_response(status)
+        self.send_response(
+            status
+        )
 
         self.send_header(
             "Content-Type",
@@ -481,10 +549,15 @@ class Handler(BaseHTTPRequestHandler):
         )
 
         self.end_headers()
-        self.wfile.write(body)
+
+        self.wfile.write(
+            body
+        )
 
     def do_OPTIONS(self):
-        self.send_response(204)
+        self.send_response(
+            204
+        )
 
         self.send_header(
             "Access-Control-Allow-Origin",
@@ -504,9 +577,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        request = urlparse(self.path)
-        action = request.path.strip("/")
-        query = parse_qs(request.query)
+        request = urlparse(
+            self.path
+        )
+
+        action = (
+            request.path
+            .strip("/")
+        )
+
+        query = parse_qs(
+            request.query
+        )
 
         try:
             with lock:
@@ -520,25 +602,34 @@ class Handler(BaseHTTPRequestHandler):
                             "problem_id",
                             [""],
                         )[0],
+                        query.get(
+                            "mode",
+                            [""],
+                        )[0],
                     )
+
+                elif action == "task_start":
+                    result = mark_task_start()
+
+                elif action == "support":
+                    result = support()
 
                 elif action == "end":
                     result = end_recording()
 
-                elif action == "support":
-                    result = support_request()
-
                 elif action == "status":
                     result = {
                         "recording": recording,
+                        "task_started": task_started,
                         "file": (
                             str(current_file)
                             if current_file
                             else None
                         ),
-                        "missing_devices": (
-                            get_missing_devices()
-                        ),
+                        "subject_id": current_subject_id,
+                        "problem_id": current_problem_id,
+                        "mode": current_mode,
+                        "missing_devices": get_missing_devices(),
                     }
 
                 else:
@@ -546,8 +637,8 @@ class Handler(BaseHTTPRequestHandler):
                         404,
                         {
                             "error": (
-                                "use /start, /end, "
-                                "/support or /status"
+                                "use /start, /task_start, "
+                                "/support, /end or /status"
                             )
                         },
                     )
@@ -561,24 +652,32 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as e:
             self.send_json(
                 400,
-                {"error": str(e)},
+                {
+                    "error": str(e)
+                },
             )
 
         except RuntimeError as e:
             self.send_json(
                 409,
-                {"error": str(e)},
+                {
+                    "error": str(e)
+                },
             )
 
         except Exception as e:
             self.send_json(
                 500,
-                {"error": str(e)},
+                {
+                    "error": str(e)
+                },
             )
 
     def do_POST(self):
         action = (
-            urlparse(self.path)
+            urlparse(
+                self.path
+            )
             .path
             .strip("/")
         )
@@ -586,7 +685,9 @@ class Handler(BaseHTTPRequestHandler):
         if action != "save":
             self.send_json(
                 404,
-                {"error": "use /save"},
+                {
+                    "error": "use /save"
+                },
             )
             return
 
@@ -599,14 +700,21 @@ class Handler(BaseHTTPRequestHandler):
             )
 
             payload = json.loads(
-                self.rfile.read(length)
-                .decode("utf-8")
+                self.rfile.read(
+                    length
+                ).decode(
+                    "utf-8"
+                )
             )
 
             with lock:
                 result = save_task_data(
                     payload.get(
                         "subject_id",
+                        "",
+                    ),
+                    payload.get(
+                        "problem_id",
                         "",
                     ),
                     payload.get(
@@ -623,24 +731,33 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as e:
             self.send_json(
                 400,
-                {"error": str(e)},
+                {
+                    "error": str(e)
+                },
             )
 
         except Exception as e:
             self.send_json(
                 500,
-                {"error": str(e)},
+                {
+                    "error": str(e)
+                },
             )
 
-    def log_message(self, format, *args):
-        # HTTPアクセスログを抑え、
-        # 実験イベントのログを見やすくする。
+    def log_message(
+        self,
+        format,
+        *args,
+    ):
         return
 
 
 if __name__ == "__main__":
     server = ThreadingHTTPServer(
-        (HOST, PORT),
+        (
+            HOST,
+            PORT,
+        ),
         Handler,
     )
 
@@ -657,7 +774,11 @@ if __name__ == "__main__":
     )
 
     print(
-        "  /start?subject_id=...&problem_id=..."
+        "  /start?subject_id=S01&problem_id=pA&mode=learning"
+    )
+
+    print(
+        "  /task_start"
     )
 
     print(
