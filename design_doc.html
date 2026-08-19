@@ -1109,6 +1109,15 @@ function requestHint(){
     Unix時刻: nowUnix(),
     経過ミリ秒: elapsedMs()
   });
+
+  // CSV/JSONへの記録とは別に、同じ押下をLSLのsupport_requestとして残す。
+  // LSL timestamp自体はCSV/JSONには保存しない。
+  if (MODE === "learning" && recorderStarted){
+    recorderRequest("support").catch(e => {
+      console.error("支援要求をLSLへ記録できませんでした:", e);
+    });
+  }
+
   save();
   showHintFlash();
 }
@@ -1277,7 +1286,11 @@ async function startRecorder(){
   status.className = "recorder-status";
   status.textContent = "デバイスを確認して記録を開始しています…";
   try {
-    const result = await recorderRequest("start", {subject_id: subjectId, problem_id: PROBLEM_ID});
+    const result = await recorderRequest("start", {
+      subject_id: subjectId,
+      problem_id: PROBLEM_ID,
+      mode: MODE
+    });
     recorderStarted = true;
     // どの回答がどの生体データに対応するか、書き出しから辿れるようにする
     xdfFile = result.file || "";
@@ -1734,6 +1747,7 @@ async function exportAll(){
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         subject_id: subject,
+        problem_id: PROBLEM_ID,
         files: files.map(f => ({ name: f.name, content: f.content }))
       })
     });
@@ -1801,9 +1815,23 @@ document.getElementById("next").addEventListener("click", () => {
 });
 
 // 次のステップへ進む（理解度テストの回答後もここに戻ってくる）
-function advance(){
-  // 「開始する」を押した時刻を記録する。ここが経過時間の 0 点になる
+async function advance(){
+  // 「開始する」を押したときは、課題画面を表示する直前にtask_startをLSLへ入れる。
   if (STEPS[current].kind === "intro"){
+    if (MODE === "learning" && recorderStarted){
+      try {
+        await recorderRequest("task_start");
+      } catch (e) {
+        const status = document.getElementById("recorder-status");
+        if (status){
+          status.className = "recorder-status error";
+          status.textContent = `課題開始マーカーを記録できません：${e.message}`;
+          status.scrollIntoView({behavior:"smooth", block:"center"});
+        }
+        return;
+      }
+    }
+
     // 途中で再読み込みされても最初の時刻を保つため、すでにあれば上書きしない
     if (!log.startedAt){
       log.startedAt   = nowStamp();
