@@ -419,7 +419,6 @@ def coverage_row(
         "layout.csv": "あり" if session.layout is not None else "なし",
         "課題全体秒": session.duration_s() if session.duration_s() else np.nan,
         "task_start": "あり" if rec and rec.task_start_lsl is not None else "なし",
-        "task_end": "あり" if rec and rec.has_task_end else "なし",
         "ヒント要請数": len(rec.support_times) if rec else 0,
     }
 

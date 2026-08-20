@@ -104,7 +104,7 @@ class Layout:
     blocks: list[dict]      # ブロックID, ラベル, 開始行, 終了行, 上, 下, 文字上, 文字下
 
     @classmethod
-    def from_frame(cls, df: pd.DataFrame) -> "Layout | None":
+    def from_frame(cls, df: pd.DataFrame | None) -> "Layout | None":
         if df is None or not len(df):
             return None
 

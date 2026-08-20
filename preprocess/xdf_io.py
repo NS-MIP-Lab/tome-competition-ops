@@ -87,6 +87,8 @@ class Recording:
     path: Path
     streams: dict[str, Stream] = field(default_factory=dict)
     task_start_lsl: float | None = None
+    # task_end は課題の終端には使わない（events.csv のほうが確か）。
+    # 実際の記録では入っていなかったため、様子を見るためだけに持っている
     has_task_end: bool = False
     truncated: bool = False              # 末尾が欠けていた（記録を途中で止めた記録）
     support_times: list[float] = field(default_factory=list)
