@@ -352,10 +352,12 @@
      問題データ（data フォルダ）
        catalog.js    … 問題の一覧（トップページのメニュー）
        pN_problem.js … ソースコードと設問
-       pN_quiz.js    … 理解度テストの4択問題
+       pN_quiz.js    … 理解度テストの問題（5択）
      問題を追加するときは、ここに2行足してください。
      =================================================================== -->
 <script src="data/catalog.js"></script>
+<script src="data/pA_problem.js"></script>
+<script src="data/pA_quiz.js"></script>
 <script src="data/pB_problem.js"></script>
 <script src="data/pB_quiz.js"></script>
 <script src="data/pC_problem.js"></script>
@@ -784,7 +786,7 @@ function setBar(ratio){
    合計滞在時間は、同じ設問の記録を足せば求められる。
 
    終了は「次へ進む」を押した時点で記録する。理解度テストを表示する前に
-   閉じるので、設問の滞在時間に4択の回答時間は混ざらない。
+   閉じるので、設問の滞在時間に理解度テストの回答時間は混ざらない。
    =================================================================== */
 function openVisit(stepId){
   log.steps.push({
@@ -960,11 +962,11 @@ const QUIZ = (typeof QUIZZES !== "undefined" && QUIZZES && QUIZZES[PROBLEM_ID]) 
 if (PROBLEM && !Object.keys(QUIZ).length){
   console.error(`理解度テストの問題データ（QUIZZES["${PROBLEM_ID}"]）を読み込めませんでした。`);
 }
-// キーはあるが中身が空の場合。このまま進めても4択が1問も出ないため、
+// キーはあるが中身が空の場合。このまま進めても理解度テストが1問も出ないため、
 // 本番の記録を取る前に気づけるよう警告する
 else if (PROBLEM && Object.values(QUIZ).every(v => !Array.isArray(v) || !v.length)){
   console.warn(`理解度テストの問題が未作成です（QUIZZES["${PROBLEM_ID}"] がすべて空）。`
-    + "このまま進めると4択は1問も出ません。");
+    + "このまま進めると理解度テストは1問も出ません。");
 }
 // 出題済みの印。再読み込みされても二重に出題・記録しないよう保存に残す
 const quizDone = log.quizDone;
@@ -1852,7 +1854,7 @@ document.getElementById("next").addEventListener("click", () => {
   }
 
   // 理解度テストを出す前に設問の滞在を閉じる。
-  // 逆にすると、設問の滞在時間に4択の回答時間が混ざってしまう
+  // 逆にすると、設問の滞在時間に理解度テストの回答時間が混ざってしまう
   const step = STEPS[current];
   if (step.id) closeVisit();
 
