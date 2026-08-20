@@ -105,6 +105,42 @@ class Session:
 
         return self.events[self.events["種別"] == KIND_HINT].copy()
 
+    def confidence(self) -> int | None:
+        """Q6 の自己評価の理解度（1〜5）。セッションに1つだけ。
+
+        JSON の「回答」の中で、キーが .confidence で終わる項目に入っている。
+        JSON が無い場合は answers.csv の項目名で拾う。
+        """
+        for row in self.meta.get("回答", []):
+            key = str(row.get("キー", ""))
+
+            if key.endswith(".confidence"):
+                try:
+                    return int(str(row.get("回答", "")).strip())
+                except (TypeError, ValueError):
+                    return None
+
+        if self.answers is not None:
+            hit = self.answers[
+                self.answers["項目"].astype(str).str.contains("理解度", na=False)
+            ]
+
+            for value in hit["回答"]:
+                try:
+                    return int(str(value).strip())
+                except (TypeError, ValueError):
+                    continue
+
+        return None
+
+    def free_text(self) -> str:
+        """Q6 の自由記述（迷った箇所）。ラベルではなく、人が読む用。"""
+        for row in self.meta.get("回答", []):
+            if str(row.get("キー", "")).endswith(".unsure"):
+                return str(row.get("回答", ""))
+
+        return ""
+
 
 # ============================================================
 # 読み込み

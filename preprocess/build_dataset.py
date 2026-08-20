@@ -33,6 +33,10 @@ import xdf_io  # noqa: E402
 ENC = "utf-8-sig"
 
 # 学習に使えるサンプルとみなす最低条件（窓単位）
+# ヒントボタンは学習用にしか出ない。検証用のセッションには
+# 介入要請の教師信号が原理的に存在しないため、マスクで外す
+MODE_LEARNING = "学習用"
+
 DEFAULT_WINDOW_S = 5.0
 DEFAULT_HOP_S = 1.0
 DEFAULT_HORIZON_S = 10.0
@@ -213,6 +217,7 @@ def build_step_rows(
         return []
 
     quizzes = quiz_lookup(session)
+    confidence = session.confidence()
     duration = session.duration_s() or 0.0
 
     by_step: dict[str, list[dict]] = {}
@@ -246,12 +251,18 @@ def build_step_rows(
             "初回開始秒": round(ivs[0]["開始秒"], 3),
             "最終終了秒": round(ivs[-1]["終了秒"], 3),
             "課題全体秒": round(duration, 3),
+            # ---- 目的変数（マルチタスク用）
             "理解度正誤": quizzes.get(step, ""),
+            "自己評価理解度": confidence if confidence is not None else np.nan,
             "介入要請回数": sum(
                 1
                 for t in rec.support_times
                 if any(iv["開始秒"] <= t < iv["終了秒"] for iv in ivs)
             ),
+            # ---- どのラベルが使えるか。マルチタスクの損失マスクに使う
+            "介入ラベル有効": int(session.mode == MODE_LEARNING),
+            "理解度ラベル有効": int(bool(quizzes.get(step, ""))),
+            "自己評価ラベル有効": int(confidence is not None),
         }
         row.update(merged)
         rows.append(row)
@@ -321,6 +332,7 @@ def build_window_rows(
 
     intervals = step_intervals(session)
     quizzes = quiz_lookup(session)
+    confidence = session.confidence()
     supports = np.array(rec.support_times, dtype=float)
 
     rows = []
@@ -346,9 +358,19 @@ def build_window_rows(
             "窓終了秒": round(end, 3),
             "窓長秒": window_s,
             "設問": step,
-            "理解度正誤": quizzes.get(step, ""),
+            # ---- 目的変数（マルチタスク用）
             "介入要請あり": int(len(upcoming) > 0),
             "介入要請までの秒数": round(float(after.min() - end), 3) if len(after) else np.nan,
+            "理解度正誤": quizzes.get(step, ""),
+            "自己評価理解度": confidence if confidence is not None else np.nan,
+            # ---- どのラベルが使えるか。マルチタスクの損失マスクに使う
+            #
+            # 自己評価はセッションに1つしかないため、この列は同じ値が
+            # 何百行も並ぶ。標本数として数えないよう、損失の重み付けか
+            # セッション単位のヘッドで扱うこと
+            "介入ラベル有効": int(session.mode == MODE_LEARNING),
+            "理解度ラベル有効": int(bool(quizzes.get(step, ""))),
+            "自己評価ラベル有効": int(confidence is not None),
         }
         row.update(segment_features(rec, gaze, start, end))
         rows.append(row)
