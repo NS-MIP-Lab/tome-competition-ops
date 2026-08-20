@@ -109,7 +109,8 @@ if (typeof PROBLEM_LIST === "undefined" || !PROBLEM_LIST.length){
 
     const name = document.createElement("td");
     name.className = "name";
-    name.innerHTML = `${p.name}<small>${p.id}</small>`;
+    // アルゴリズム名は出さない。被験者がこの画面を目にするため
+    name.innerHTML = `${p.label || p.id}<small>${p.id}</small>`;
     tr.appendChild(name);
 
     [["learning", "学習用", "btn learning"], ["test", "検証用", "btn"]].forEach(([mode, label, cls]) => {
@@ -148,7 +149,7 @@ function listSaved(){
 
     const parts = key.split(":");            // design-doc : 問題ID : モード
     const problem = (typeof PROBLEM_LIST !== "undefined"
-      && (PROBLEM_LIST.find(p => p.id === parts[1]) || {}).name) || parts[1];
+      && (PROBLEM_LIST.find(p => p.id === parts[1]) || {}).label) || parts[1];
     found.push({
       key,
       label: `${problem}／${parts[2] === "learning" ? "学習用" : "検証用"}`,
