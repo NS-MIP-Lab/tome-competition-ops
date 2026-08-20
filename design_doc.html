@@ -356,14 +356,14 @@
      問題を追加するときは、ここに2行足してください。
      =================================================================== -->
 <script src="data/catalog.js"></script>
-<script src="data/pA_problem.js"></script>
-<script src="data/pA_quiz.js"></script>
 <script src="data/pB_problem.js"></script>
 <script src="data/pB_quiz.js"></script>
 <script src="data/pC_problem.js"></script>
 <script src="data/pC_quiz.js"></script>
 <script src="data/pD_problem.js"></script>
 <script src="data/pD_quiz.js"></script>
+<script src="data/pE_problem.js"></script>
+<script src="data/pE_quiz.js"></script>
 
 <script>
 /* ===================================================================
@@ -959,6 +959,12 @@ function refreshMissingMsg(count){
 const QUIZ = (typeof QUIZZES !== "undefined" && QUIZZES && QUIZZES[PROBLEM_ID]) || {};
 if (PROBLEM && !Object.keys(QUIZ).length){
   console.error(`理解度テストの問題データ（QUIZZES["${PROBLEM_ID}"]）を読み込めませんでした。`);
+}
+// キーはあるが中身が空の場合。このまま進めても4択が1問も出ないため、
+// 本番の記録を取る前に気づけるよう警告する
+else if (PROBLEM && Object.values(QUIZ).every(v => !Array.isArray(v) || !v.length)){
+  console.warn(`理解度テストの問題が未作成です（QUIZZES["${PROBLEM_ID}"] がすべて空）。`
+    + "このまま進めると4択は1問も出ません。");
 }
 // 出題済みの印。再読み込みされても二重に出題・記録しないよう保存に残す
 const quizDone = log.quizDone;
