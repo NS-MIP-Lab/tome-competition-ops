@@ -85,14 +85,16 @@ int main(void)
       blocks:[
         {
           type:"grid",
-          headers:["処理順","n","加算前の bin[n]","(n / 2) % 2","加算後の bin[n]"],
-          widths:["14%","10%","23%","23%","30%"],
+          /* 「処理順」の列は置かない。n が 1 ずつ増えるので、処理順と
+             同じ情報になってしまう（問題A〜D では両者が別の値になる）。 */
+          headers:["n","加算前の bin[n]","(n / 2) % 2","加算後の bin[n]"],
+          widths:["16%","26%","26%","32%"],
           rows:[
-            {example:true, cells:["記入例","0","0","0","0"]},
-            {cells:["1","1","1", null,null]},
-            {cells:["2","2","0", null,null]},
-            {cells:["3","3","1", null,null]},
-            {cells:["4","4","0", null,null]}
+            {example:true, cells:["0（記入例）","0","0","0"]},
+            {cells:["1","1", null,null]},
+            {cells:["2","0", null,null]},
+            {cells:["3","1", null,null]},
+            {cells:["4","0", null,null]}
           ]
         },
         {type:"note", text:"上の表をもとに、次の空欄を埋めてください。"},
