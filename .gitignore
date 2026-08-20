@@ -223,3 +223,6 @@ __marimo__/
 developer_key
 # macOS
 .DS_Store
+
+# 前処理の出力（再生成できるので追跡しない）
+dataset/
