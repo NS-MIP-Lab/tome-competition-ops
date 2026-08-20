@@ -374,6 +374,35 @@ STREAM_KEYS = [
 ]
 
 
+def classify(
+    session: task_io.Session,
+    rec: xdf_io.Recording | None,
+    gaze: pd.DataFrame,
+) -> str:
+    """このセッションが学習に使えるかを一言で表す。
+
+    「中断」は、記録を途中で止めた回。XDF の末尾が欠けたまま
+    課題データも保存されていない形になる。異常ではないので、
+    欠けの警告とは分けて表示する。
+    """
+    if rec is None:
+        return "XDFなし"
+
+    if rec.truncated and session.json_path is None:
+        return "中断"
+
+    if rec.task_start_lsl is None:
+        return "整列不可（task_startなし）"
+
+    if session.events is None:
+        return "課題データなし"
+
+    if len(gaze) == 0:
+        return "視線なし"
+
+    return "使用可"
+
+
 def coverage_row(
     session: task_io.Session,
     rec: xdf_io.Recording | None,
@@ -383,6 +412,7 @@ def coverage_row(
         "被験者ID": session.subject,
         "問題ID": session.problem,
         "条件": session.mode,
+        "判定": classify(session, rec, gaze),
         "XDF": session.xdf.name if session.xdf else "",
         "課題データ": "あり" if session.json_path else "なし",
         "events.csv": "あり" if session.events is not None else "なし",
@@ -470,15 +500,21 @@ def main() -> int:
                  "採用": r["変換"] == transform.name, **r}
             )
 
+        verdict = classify(session, rec, gaze)
+
         if len(gaze):
             print(f"    視線 {len(gaze)} 件、採用した変換: {transform.name}")
             gaze_all.append(
                 gaze.assign(被験者ID=session.subject, 問題ID=session.problem)
             )
-        else:
+        elif verdict != "中断":
             print("    サーフェス視線が無いため、視線の特徴量は空になります")
 
         coverage.append(coverage_row(session, rec, gaze))
+
+        if verdict == "中断":
+            print("    途中で止めた記録なので、特徴量は作りません")
+            continue
 
         if session.events is None:
             print("    events.csv が無いため、特徴量は作れません")
@@ -541,6 +577,14 @@ def main() -> int:
         known = step_df[step_df["理解度正誤"] != ""]
         correct = int((known["理解度正誤"] == "正解").sum())
         print(f"理解度テスト: {correct} / {len(known)} 問 正解（補助ラベル）")
+
+    # 判定の内訳。「中断」は途中で止めた回なので、欠けの警告とは分けて出す
+    verdicts = pd.DataFrame(coverage)["判定"].value_counts()
+    print()
+    print("セッションの判定:")
+
+    for name, count in verdicts.items():
+        print(f"  {name}: {count} 件")
 
     return 0
 

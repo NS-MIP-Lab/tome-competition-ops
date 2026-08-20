@@ -88,6 +88,7 @@ class Recording:
     streams: dict[str, Stream] = field(default_factory=dict)
     task_start_lsl: float | None = None
     has_task_end: bool = False
+    truncated: bool = False              # 末尾が欠けていた（記録を途中で止めた記録）
     support_times: list[float] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
@@ -200,17 +201,18 @@ def last_complete_chunk(data: bytes) -> int:
     return last
 
 
-def load_streams(path: Path) -> tuple[list, list[str]]:
+def load_streams(path: Path) -> tuple[list, list[str], bool]:
     """pyxdf で読む。末尾が欠けている場合は切り落としてから読み直す。
 
-    S01/pC は記録の停止に失敗して末尾 21 バイトが欠けており、
-    そのままでは pyxdf が struct.error で落ちた。
+    記録を途中で止めると末尾のチャンクが欠け、pyxdf が struct.error で落ちる。
+    途中で止めた記録は、末尾に数十バイトの欠けが残る。
+    3つめの戻り値が「末尾が欠けていたか」。
     """
     notes: list[str] = []
 
     try:
         streams, _ = pyxdf.load_xdf(str(path))
-        return streams, notes
+        return streams, notes, False
     except Exception as e:
         # except を抜けると e が消えるので、メッセージだけ残す
         reason = f"{type(e).__name__}: {e}"
@@ -229,7 +231,7 @@ def load_streams(path: Path) -> tuple[list, list[str]]:
         repaired.write_bytes(data[:cut])
         streams, _ = pyxdf.load_xdf(str(repaired))
 
-    return streams, notes
+    return streams, notes, True
 
 
 # ============================================================
@@ -244,8 +246,9 @@ def load(path: Path) -> Recording:
     """
     rec = Recording(path=Path(path))
 
-    streams, notes = load_streams(Path(path))
+    streams, notes, truncated = load_streams(Path(path))
     rec.notes.extend(notes)
+    rec.truncated = truncated
 
     # ---- 先にマーカーを読み、時刻の原点を決める
     raw_marker = None
