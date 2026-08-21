@@ -178,7 +178,7 @@ def main():
         channel.on_burst_data = on_data
 
         channel.set_period(MESSAGE_PERIOD)
-        channel.set_search_timeout(12)
+        channel.set_search_timeout(255)
         channel.set_rf_freq(RF_FREQUENCY)
 
         channel.set_id(

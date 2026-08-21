@@ -1109,6 +1109,19 @@ function submitQuiz(){
 /* ================= ヒント要請（学習用のみ） ================= */
 // 押した時刻とそのときの設問を記録し、実験員に気づいてもらうための合図を数秒間出す
 let hintTimer = null;
+
+// ヒントボタンが押されたことをiPhoneへ通知する（ntfy）。
+// 通知に失敗しても、課題本体の記録・画面操作は止めない。
+function notifyHintRequest(){
+  fetch("https://ntfy.sh/iphone_d2x5DxpaTtALDNYauNv26uuzzVR53-rK", {
+    method: "POST",
+    mode: "no-cors",
+    body: "ヒントが要請されました"
+  }).catch(e => {
+    console.error("ntfy通知を送信できませんでした:", e);
+  });
+}
+
 function requestHint(){
   const step = STEPS[current];
   log.hints.push({
@@ -1127,6 +1140,7 @@ function requestHint(){
     });
   }
 
+  notifyHintRequest();
   save();
   showHintFlash();
 }

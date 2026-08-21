@@ -226,3 +226,5 @@ developer_key
 
 # 前処理の出力（再生成できるので追跡しない）
 dataset/
+
+task_data/
