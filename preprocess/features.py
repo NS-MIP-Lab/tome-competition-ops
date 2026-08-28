@@ -293,17 +293,27 @@ def pupil_features(stream: Stream | None) -> dict:
 # ============================================================
 
 def fixation_columns() -> list[str]:
-    return ["注視_回数", "注視_平均時間ms", "注視_合計時間ms"]
+    # 回数と合計時間は区間の長さで割る。設問単位は滞在時間がばらつくので、
+    # 生の値だと「長くいた設問ほど大きい」だけの値になり、滞在ミリ秒と
+    # 同じ情報を二重に持ってしまう
+    return ["注視_回数毎秒", "注視_平均時間ms", "注視_時間割合", "注視_件数"]
 
 
-def fixation_features(stream: Stream | None) -> dict:
-    """注視の数と長さ。
+def fixation_features(stream: Stream | None, span_s: float | None = None) -> dict:
+    """注視の頻度と長さ。
 
     このストリームは1つの注視につき複数サンプルを流すため、
     fixation_id でまとめてから数える。duration はその注視の最大値を採る。
+
+    span_s（区間の長さ）を渡すと、回数と合計時間を毎秒・割合に直す。
+    渡さないときは生の件数だけを返す。
+
+    注意：S01/pA では平均時間が 307〜308ms に張り付いており、Pupil 側の
+    検出設定によるものと見られる。本実験でも注視数がセッション間で25倍
+    ばらついている（397〜10,361）。使う前に品質を確かめること。
     """
     out = _nan_dict(fixation_columns())
-    out["注視_回数"] = 0
+    out["注視_件数"] = 0
 
     if stream is None or len(stream) == 0:
         return out
@@ -313,7 +323,7 @@ def fixation_features(stream: Stream | None) -> dict:
     durations = values[:, 3]
 
     unique = np.unique(ids[np.isfinite(ids)])
-    out["注視_回数"] = int(len(unique))
+    out["注視_件数"] = int(len(unique))
 
     if len(unique) == 0:
         return out
@@ -324,9 +334,15 @@ def fixation_features(stream: Stream | None) -> dict:
     )
     per_fixation = per_fixation[np.isfinite(per_fixation)]
 
-    if len(per_fixation):
-        out["注視_平均時間ms"] = round(float(per_fixation.mean()), 2)
-        out["注視_合計時間ms"] = round(float(per_fixation.sum()), 2)
+    if not len(per_fixation):
+        return out
+
+    out["注視_平均時間ms"] = round(float(per_fixation.mean()), 2)
+
+    if span_s and span_s > 0:
+        out["注視_回数毎秒"] = round(len(unique) / span_s, 4)
+        # 合計が区間長を超えることがある（注視が区間をまたぐ）。1 で頭打ちにする
+        out["注視_時間割合"] = round(min(per_fixation.sum() / 1000.0 / span_s, 1.0), 4)
 
     return out
 
@@ -335,29 +351,49 @@ def fixation_features(stream: Stream | None) -> dict:
 # 視線の領域
 # ============================================================
 
+# ブロックの滞在としてこれ未満は数えない（境界の揺れで偽の遷移が出るため）
+GAZE_MIN_DWELL_S = 0.10
+
+
 def gaze_columns() -> list[str]:
     cols = [
         "視線_サンプル数",
         "視線_画面内率",
         "視線_コード率",
         "視線_設計書率",
-        "視線_往復回数",
+        # 回数は毎秒に直す。設問単位は滞在時間が数十秒〜数千秒とばらつくため、
+        # 生の回数だと「長くいた設問ほど大きい」だけの値になり、滞在ミリ秒と
+        # 同じ情報を二重に持ってしまう
+        "視線_往復回数毎秒",
+        "視線_ブロック遷移毎秒",
+        # ブロック境界を使わないので、縦の校正がずれていても影響を受けない
+        "視線_コード縦移動量毎秒",
+        "視線_コード縦分散",
     ]
 
     cols += [f"視線_B{i}率" for i in range(1, MAX_BLOCKS + 1)]
     return cols
 
 
-def gaze_features(region: np.ndarray, block: np.ndarray) -> dict:
-    """領域とブロックの割合、コードと設計書の往復回数。
+def gaze_features(
+    region: np.ndarray,
+    block: np.ndarray,
+    times: np.ndarray | None = None,
+    y_window: np.ndarray | None = None,
+) -> dict:
+    """領域とブロックの割合、行き来の頻度、コード内の縦の動き。
 
     割合の分母は「画面内にあったサンプル」。画面外の割合は別の列で持つ。
+    回数は区間の長さで割って毎秒に直す。
+
+    times と y_window を渡すと、コード内の縦の動きも出す。本実験9セッションで
+    調べたところ、押下直前は縦移動量が減る（8件中7件）。ブロック境界を使わない
+    ので、縦の校正がずれていても影響を受けない。
     """
     from regions import REGION_CODE, REGION_DOC
 
     out = _nan_dict(gaze_columns())
     out["視線_サンプル数"] = int(len(region))
-    out["視線_往復回数"] = 0
 
     if len(region) == 0:
         return out
@@ -371,6 +407,15 @@ def gaze_features(region: np.ndarray, block: np.ndarray) -> dict:
 
     out["視線_画面内率"] = round(float(on_screen.mean()), 4)
 
+    # 区間の長さ。時刻が無ければサンプル数から概算できないので回数は出さない
+    span = None
+
+    if times is not None and len(times) > 1:
+        span = float(np.max(times) - np.min(times))
+
+        if span <= 0:
+            span = None
+
     n_on = int(on_screen.sum())
 
     if n_on == 0:
@@ -379,9 +424,12 @@ def gaze_features(region: np.ndarray, block: np.ndarray) -> dict:
     out["視線_コード率"] = round(float(is_code.sum() / n_on), 4)
     out["視線_設計書率"] = round(float(is_doc.sum() / n_on), 4)
 
-    # 往復回数。画面外を挟んでも、コードと設計書が入れ替わったら1回と数える
+    # 往復。画面外を挟んでも、コードと設計書が入れ替わったら1回と数える
     side = region[on_screen]
-    out["視線_往復回数"] = int((side[1:] != side[:-1]).sum()) if len(side) > 1 else 0
+    flips = int((side[1:] != side[:-1]).sum()) if len(side) > 1 else 0
+
+    if span:
+        out["視線_往復回数毎秒"] = round(flips / span, 4)
 
     n_code = int(is_code.sum())
 
@@ -392,7 +440,56 @@ def gaze_features(region: np.ndarray, block: np.ndarray) -> dict:
                 float((block[is_code] == name).sum() / n_code), 4
             )
 
+    # ---- ここから下はコード側だけを見る
+    if times is None or y_window is None or n_code < 2:
+        return out
+
+    times = np.asarray(times, dtype=float)
+    y_window = np.asarray(y_window, dtype=float)
+
+    tc = times[is_code]
+    yc = y_window[is_code]
+    good = np.isfinite(yc)
+    tc, yc = tc[good], yc[good]
+
+    if len(yc) < 2:
+        return out
+
+    out["視線_コード縦分散"] = round(float(yc.var()), 6)
+
+    if span:
+        out["視線_コード縦移動量毎秒"] = round(float(np.abs(np.diff(yc)).sum() / span), 4)
+        out["視線_ブロック遷移毎秒"] = round(
+            _block_transitions(block[is_code][good], tc) / span, 4
+        )
+
     return out
+
+
+def _block_transitions(labels: np.ndarray, times: np.ndarray) -> int:
+    """ブロックが変わった回数。短すぎる滞在は数えない。
+
+    境界の上で視線が揺れると偽の遷移が並ぶので、GAZE_MIN_DWELL_S 未満の
+    滞在は無かったことにしてから数える。
+    """
+    if len(labels) < 2:
+        return 0
+
+    runs = []
+    cur = labels[0]
+    start = times[0]
+
+    for i in range(1, len(labels)):
+        if labels[i] != cur:
+            runs.append((cur, times[i] - start))
+            cur = labels[i]
+            start = times[i]
+
+    runs.append((cur, times[-1] - start))
+
+    keep = [name for name, dwell in runs if dwell >= GAZE_MIN_DWELL_S and name != ""]
+
+    return sum(1 for i in range(1, len(keep)) if keep[i] != keep[i - 1])
 
 
 # ============================================================

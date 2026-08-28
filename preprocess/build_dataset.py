@@ -37,7 +37,10 @@ ENC = "utf-8-sig"
 # 介入要請の教師信号が原理的に存在しないため、マスクで外す
 MODE_LEARNING = "学習用"
 
-DEFAULT_WINDOW_S = 5.0
+# 窓は10秒。5秒だと注視と心拍がそろわない。本実験 S06/pE では5秒窓の
+# 45% で注視がゼロ、32% で RR が5拍未満だった。10秒にすると 26% と 0% になる。
+# 刻み幅は1秒のままなので行数はほとんど変わらない。
+DEFAULT_WINDOW_S = 10.0
 DEFAULT_HOP_S = 1.0
 DEFAULT_HORIZON_S = 10.0
 
@@ -181,13 +184,22 @@ def segment_features(
     out.update(features.pupil_features(pupil.slice(start_s, end_s) if pupil else None))
 
     fix = rec.get("PupilFixations")
-    out.update(features.fixation_features(fix.slice(start_s, end_s) if fix else None))
+    out.update(
+        features.fixation_features(
+            fix.slice(start_s, end_s) if fix else None,
+            span_s=end_s - start_s,
+        )
+    )
 
     if len(gaze):
         sel = gaze[(gaze["経過秒"] >= start_s) & (gaze["経過秒"] < end_s)]
         out.update(
             features.gaze_features(
-                sel["領域"].to_numpy(), sel["ブロックID"].to_numpy()
+                sel["領域"].to_numpy(),
+                sel["ブロックID"].to_numpy(),
+                # 回数を毎秒に直すのと、コード内の縦の動きを出すのに使う
+                times=sel["経過秒"].to_numpy(),
+                y_window=sel["y_window"].to_numpy(),
             )
         )
     else:
