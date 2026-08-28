@@ -20,6 +20,11 @@ from xdf_io import Stream, rr_values
 # ------------------------------------------------------------
 
 # 脳波の帯域（Hz）
+#
+# 低γ（30〜40Hz）は皮質γ活動として扱わないこと。乾式電極ではここに出るのは
+# 主に筋電（側頭筋・前頭筋・首）である。列を消さないのは、筋緊張そのものが
+# 認知負荷や行き詰まりと関係し、介入タイミングの推定に使えるため。
+# 筋電なら4chが同時に上がり、脳波_振幅超過率 と相関する。
 BANDS = {
     "θ": (4.0, 8.0),
     "α": (8.0, 13.0),
@@ -27,6 +32,17 @@ BANDS = {
     "低γ": (30.0, 40.0),
 }
 
+# サンプリング周波数は公称値で固定する。
+#
+# 本実験9セッションの XDF で実測したところ、実効レートは 256.0299〜256.0303 Hz
+# （公称との差 0.012%）で、1.5倍を超えるサンプル間隔は9本すべてで0件だった。
+# 取りこぼしも無い。帯域境界のずれは 0.001Hz 相当なので公称値のままでよい。
+#
+# **実効レートを fs に入れてはいけない。** muselsl はタイムスタンプを公称
+# 256Hz の線形な格子に載せるため（実測の間隔は p1〜p75 が 3.9055〜3.9057ms で
+# ほぼ一定）、そこから出した実効レートは循環している。取りこぼしがあった場合も
+# デバイス側は 256Hz で取り続けているので、fs を下げるのは逆向きの補正になる。
+# 対処は穴の検出と補間または窓の除外。
 EEG_RATE = 256.0
 EEG_BANDPASS = (1.0, 40.0)
 
@@ -71,18 +87,56 @@ def eeg_columns() -> list[str]:
         for band in BANDS:
             cols.append(f"脳波_{ch}_{band}")
 
+    # 相対パワーと総パワー。
+    #
+    # 絶対値（µV²）は電極の当たりで数倍変わるので、被験者をまたぐと比べられない。
+    # 学習側でセッションごとに標準化しても消えるのは「セッション全体のスケール」
+    # だけで、セッション内で全帯域が同時に上下する共通ゲイン（首に力が入る、
+    # 電極がずれる）は残る。相対パワーは窓ごとに比を取るのでこれが割り落ちる。
+    #
+    # 分母は4帯域の合計（≒4〜40Hz）。1〜40Hz の積分にすると瞬目のエネルギー
+    # （4Hz未満）が分母に入り、相対パワーが瞬目に振られる。
+    # 合計が1になるので4列のうち1列は冗長。木系のモデルなら害はない。
+    for ch in EEG_CHANNELS:
+        for band in BANDS:
+            cols.append(f"脳波_{ch}_{band}相対")
+
+    # 比にすると振幅そのものの情報が消えるので、別列で残す
+    cols += [f"脳波_{ch}_総パワー" for ch in EEG_CHANNELS]
+
     cols += [
         "脳波_θα比",
         "脳波_前頭左右差α",
         "脳波_サンプル数",
         "脳波_品質",
         "脳波_振幅超過率",
+        # 損失マスク。ラベル側の「〇〇ラベル有効」と同じ使い方をする。
+        # 行は落とさないので、学習側でこの列を見て脳波の損失を外すこと
+        "脳波有効",
     ]
     return cols
 
 
+# 品質のうち、これだけを有効として扱う
+EEG_QUALITY_OK = "有効"
+
+
 def eeg_features(stream: Stream | None) -> dict:
-    """帯域パワーを Welch で出す。単位は µV²（帯域内を積分した値）。"""
+    """帯域パワーを Welch で出す。単位は µV²（帯域内を積分した値）。
+
+    品質の判定結果は `脳波_品質` と、それを 0/1 に落とした `脳波有効` で持つ。
+    **行は落とさない。** どの行を使うかは学習側で決める。
+    """
+    out = _eeg_features(stream)
+
+    # 品質は途中で上書きされる（振幅で判定したあと、区間が短ければ差し替わる）。
+    # マスクは必ず最後に立てる
+    out["脳波有効"] = int(out["脳波_品質"] == EEG_QUALITY_OK)
+
+    return out
+
+
+def _eeg_features(stream: Stream | None) -> dict:
     out = _nan_dict(eeg_columns())
     out["脳波_サンプル数"] = 0
     out["脳波_品質"] = "データなし"
@@ -140,6 +194,22 @@ def eeg_features(stream: Stream | None) -> dict:
             value = float(np.trapezoid(psd[sel], freqs[sel])) if sel.any() else np.nan
             powers[label][band] = value
             out[f"脳波_{label}_{band}"] = round(value, 4)
+
+    # 相対パワーと総パワー。同じ PSD の積分値を使い回す
+    for label, band_power in powers.items():
+        values_ = [band_power.get(b, np.nan) for b in BANDS]
+
+        if not all(np.isfinite(v) for v in values_):
+            continue
+
+        total = float(sum(values_))
+        out[f"脳波_{label}_総パワー"] = round(total, 4)
+
+        if total <= 0:
+            continue
+
+        for band in BANDS:
+            out[f"脳波_{label}_{band}相対"] = round(band_power[band] / total, 4)
 
     # θ/α 比。4ch の平均どうしで割る
     theta = [p["θ"] for p in powers.values() if np.isfinite(p.get("θ", np.nan))]
