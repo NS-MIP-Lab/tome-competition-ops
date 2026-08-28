@@ -190,28 +190,55 @@ def score_fit(
     }
 
 
+# サーフェスの左右の向き。
+#
+# AprilTag の並びで決まるので、surface_definitions_v01 が同じなら
+# 全セッションで同じ向きになる。本実験9セッションはハッシュが一致していた
+# （3e2f43be8a813ec9）。S01/pA では視線 x が二山にはっきり分かれ、細い山
+# （0.10〜0.25）が layout.csv のコード文字範囲（0.02〜0.22）と重なったので、
+# **反転なし**（コードは左）と確定している。
+#
+# セッションごとに推定してはいけない。左右で縦の一致率に大きな差が出ない
+# セッションがあり、推定にすると回ごとに答えが揺れてコード側と設計書側が
+# 入れ替わる。向きは記録の設定で決まるものなので、ここで固定する。
+#
+# サーフェスの定義を変えたときだけ、ここを見直すこと。
+FLIP_X = False
+
+# サーフェスの上下の向き。
+#
+# Pupil は左下原点、layout.csv は左上原点なので、y は必ず反転する
+# （y_window = 1 - y_surface）。x と同じくサーフェスの定義で決まるので、
+# セッションごとに変わらない。
+#
+# 本実験9セッションで両方を採点したところ、差がはっきり出た4件はすべて
+# 反転が勝った（S03/pE で 25.2 ポイント、S04/pE で 19.0）。そのままが
+# 勝った3件はいずれも差が 0.0〜4.3 ポイントで、判定が雑音に負けていた。
+FLIP_Y = True
+
+
 def best_transform(
     x_surface: np.ndarray,
     y_surface: np.ndarray,
     layout: Layout,
 ) -> tuple[Transform, list[dict]]:
-    """4通りを採点し、一致率が最も高いものを返す。
+    """変換を返す。向きは FLIP_X / FLIP_Y で固定する。
 
-    採点できない（視線が無い、layout が無い）ときは既定の変換を返す。
+    以前は4通り（x反転 × y反転）を縦の一致率で選んでいたが、差が小さい
+    セッションでは判定が雑音に負け、コード側と設計書側が入れ替わったり
+    上下がひっくり返ったりしていた。向きはサーフェスの定義で決まるので
+    セッションごとに変わらない。
+
+    採点結果（4通り）は当てはまりの確認用に返す。surface_fit.csv で
+    一致率が低いセッションは、ブロック別の特徴量を信用しないこと。
     """
     rows = [score_fit(x_surface, y_surface, layout, t) for t in CANDIDATES]
 
-    scored = [
-        (r["文字範囲一致率_コード帯"], t, r)
-        for r, t in zip(rows, CANDIDATES)
-        if r["コード帯サンプル数"] > 0 and np.isfinite(r["文字範囲一致率_コード帯"])
-    ]
+    # 向きは FLIP_X / FLIP_Y で固定する。採点は当てはまりの確認用に残す
+    for r, t in zip(rows, CANDIDATES):
+        r["採用"] = (t.flip_x == FLIP_X and t.flip_y == FLIP_Y)
 
-    if not scored:
-        return CANDIDATES[0], rows
-
-    scored.sort(key=lambda s: s[0], reverse=True)
-    return scored[0][1], rows
+    return Transform(flip_x=FLIP_X, flip_y=FLIP_Y), rows
 
 
 # ============================================================
