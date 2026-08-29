@@ -225,6 +225,12 @@ developer_key
 .DS_Store
 
 # 前処理の出力（再生成できるので追跡しない）
+# 設定を変えて作り直せるよう、窓の作り方を名前に入れた dataset_* も同じ扱い
 dataset/
+dataset_*/
+
+# ただし既定の設定で作った1つだけは追跡する。学習を担当する人へ渡すため、
+# XDF から作り直さなくても表が手に入るようにしておく
+!dataset_win10_hop1_horizon10/
 
 task_data/

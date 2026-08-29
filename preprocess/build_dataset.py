@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import features  # noqa: E402
 import regions  # noqa: E402
 import task_io  # noqa: E402
+import train_table  # noqa: E402
 import xdf_io  # noqa: E402
 
 ENC = "utf-8-sig"
@@ -488,6 +489,36 @@ def main() -> int:
         action="store_true",
         help="gaze_regions.csv を書かない（数十万行になるため）",
     )
+    parser.add_argument(
+        "--standardize",
+        choices=["baseline", "session", "none"],
+        default="baseline",
+        help="train_window.csv の標準化。baseline は課題の最初の一定時間を基準に"
+             "する（実運用でも同じことができる）。session はセッション全体を使う",
+    )
+    parser.add_argument(
+        "--baseline-min",
+        type=float,
+        default=3.0,
+        help="--standardize baseline のときの基準区間（分）",
+    )
+    parser.add_argument(
+        "--eeg-columns",
+        choices=["relative", "absolute", "both"],
+        default="relative",
+        help="train_window.csv に入れる脳波の列。relative は相対パワーと総パワー",
+    )
+    parser.add_argument(
+        "--progress-columns",
+        action="store_true",
+        help="課題の進行度（設問・窓開始秒）も特徴量に入れる。押下は終盤と特定の"
+             "設問に偏るため、既定では外している",
+    )
+    parser.add_argument(
+        "--no-train-table",
+        action="store_true",
+        help="train_window.csv と train_columns.csv を書かない",
+    )
     args = parser.parse_args()
 
     task_data = Path(args.task_data)
@@ -582,6 +613,22 @@ def main() -> int:
 
     write("features_step.csv", step_df)
     write("features_window.csv", window_df)
+
+    if args.no_train_table:
+        print("  train_window.csv       （--no-train-table のため書きません）")
+    else:
+        train_df, columns_df, notes = train_table.build(
+            window_df,
+            standardize=args.standardize,
+            baseline_s=args.baseline_min * 60.0,
+            eeg=args.eeg_columns,
+            progress=args.progress_columns,
+        )
+        write("train_window.csv", train_df)
+        write("train_columns.csv", columns_df)
+
+        for note in notes:
+            print(f"    注記: {note}")
 
     if args.no_gaze_samples:
         print("  gaze_regions.csv       （--no-gaze-samples のため書きません）")
